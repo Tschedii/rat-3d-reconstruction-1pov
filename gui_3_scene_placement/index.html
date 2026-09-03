@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GUI 3 — scene placement</title>
+<style>
+  :root {
+    --bg: #15140f; --bg-elevated: #1e1c15; --text: #f1ede1; --text-dim: #9c9686;
+    --accent: #c9a13b; --border: #34311f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; height: 100vh; width: 100vw; }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  #panel {
+    position: fixed; top: 16px; left: 16px; width: 300px;
+    background: rgba(30,28,21,0.9); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    max-height: calc(100vh - 32px); overflow-y: auto;
+    display: none;
+  }
+  .eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px 0; }
+  .title { font-size: 15px; font-weight: 600; margin: 0 0 10px 0; }
+  .section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .section-label { font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+
+  button { font-family: var(--sans); font-size: 12.5px; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; width: 100%;
+    text-align: left; margin-bottom: 5px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.active { background: var(--accent); color: #1a1608; border-color: var(--accent); font-weight: 600; }
+
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; text-align: center; }
+
+  .save-row button { background: #2a4a2e; border-color: #3f6b46; color: #cdeed1; font-weight: 600; text-align: center; }
+  .confirm-btn { background: #3a4a6e !important; border-color: #5c76ad !important; color: #d8e2f5 !important; font-weight: 600; text-align: center; }
+  .confirm-btn.confirmed { background: #2a4a2e !important; border-color: #3f6b46 !important; color: #cdeed1 !important; }
+
+  .check-row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
+
+  #selLabel { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  #status { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+  .hint { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); line-height: 1.6; margin-top: 8px; }
+
+  /* --- setup overlay --- */
+  #setupOverlay {
+    position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .setup-card { width: 560px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 28px 30px; }
+  .setup-card h1 { font-size: 19px; margin: 0 0 4px 0; }
+  .setup-card .eyebrow { margin-bottom: 10px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  input[type=text] {
+    font-family: var(--mono); font-size: 12.5px; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .setup-card .enter-btn { width: auto; padding: 10px 22px; font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1a1608; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div id="setupOverlay">
+  <div class="setup-card">
+    <p class="eyebrow">Pipeline stage 3 / 4</p>
+    <h1>Scene placement — setup</h1>
+    <div class="field"><label>environment mesh (.obj) path</label><input type="text" id="cfgEnv" placeholder="/path/to/environment.obj"></div>
+    <div class="field"><label>camera calibration JSON path (from GUI 1)</label><input type="text" id="cfgCalib" placeholder="/path/to/2026_08_27.json"></div>
+    <div class="field"><label>object 1 mesh (.obj) path — optional</label><input type="text" id="cfgRat1" placeholder="/path/to/object_1/frame_XXXXXX/mesh.obj"></div>
+    <div class="field"><label>object 1 eye positions JSON — optional</label><input type="text" id="cfgRat1Eyes" placeholder="/path/to/object_1_eye_positions.json"></div>
+    <div class="field"><label>object 2 mesh (.obj) path — optional</label><input type="text" id="cfgRat2" placeholder="/path/to/object_2/frame_XXXXXX/mesh.obj"></div>
+    <div class="field"><label>object 2 eye positions JSON — optional</label><input type="text" id="cfgRat2Eyes" placeholder="/path/to/object_2_eye_positions.json"></div>
+    <button class="enter-btn" id="enterBtn">Enter scene</button>
+  </div>
+</div>
+
+<div id="stage"></div>
+
+<div id="panel">
+  <p class="eyebrow">Scene placement</p>
+  <p class="title">Cameras + rats in environment</p>
+
+  <div class="section">
+    <div class="section-label">Selection: <span id="selLabel">none</span></div>
+    <div class="row">
+      <button id="modeTranslate">Move (T)</button>
+      <button id="modeRotate">Rotate (R)</button>
+      <button id="modeScale">Scale (S)</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Camera rig</div>
+    <button id="selectRig" data-kind="rig">Select whole rig (0)</button>
+    <div id="camList"></div>
+    <button class="confirm-btn" id="confirmBtn" style="margin-top:8px;">Confirm camera position</button>
+  </div>
+
+  <div class="section" id="placementSection" style="display:none;">
+    <div class="section-label">Place meshes</div>
+    <div class="check-row"><input type="checkbox" id="chkObj1"> <label for="chkObj1">Object 1</label></div>
+    <div class="check-row"><input type="checkbox" id="chkObj2"> <label for="chkObj2">Object 2</label></div>
+    <div class="check-row"><input type="checkbox" id="chkFov"> <label for="chkFov">Field of view</label></div>
+  </div>
+
+  <div class="section save-row">
+    <button id="saveBtn">Save placement</button>
+    <button id="exportBtn">Export scene as .obj</button>
+  </div>
+
+  <div id="status">loading…</div>
+  <div class="hint">
+    drag to orbit &middot; scroll to zoom<br>
+    click a camera dot to select it<br>
+    keys 1-6 = cameras, 0 = whole rig<br>
+    move the whole rig first (coarse fit), then fine-tune individual cameras<br>
+    confirm the camera position to unlock mesh placement
+  </div>
+</div>
+
+<script src="bundle.js"></script>
+<script>
+const SETUP_API = 'http://127.0.0.1:8973';
+
+async function prefillSetup() {
+  try {
+    const cfg = await (await fetch(`${SETUP_API}/api/config`)).json();
+    if (cfg.env_mesh_path) document.getElementById('cfgEnv').value = cfg.env_mesh_path;
+    if (cfg.calib_json_path) document.getElementById('cfgCalib').value = cfg.calib_json_path;
+    if (cfg.rat1_mesh_path) document.getElementById('cfgRat1').value = cfg.rat1_mesh_path;
+    if (cfg.rat1_eyes_path) document.getElementById('cfgRat1Eyes').value = cfg.rat1_eyes_path;
+    if (cfg.rat2_mesh_path) document.getElementById('cfgRat2').value = cfg.rat2_mesh_path;
+    if (cfg.rat2_eyes_path) document.getElementById('cfgRat2Eyes').value = cfg.rat2_eyes_path;
+  } catch (e) { /* no config yet */ }
+}
+
+document.getElementById('enterBtn').addEventListener('click', async () => {
+  const cfg = {
+    env_mesh_path: document.getElementById('cfgEnv').value.trim(),
+    calib_json_path: document.getElementById('cfgCalib').value.trim(),
+    rat1_mesh_path: document.getElementById('cfgRat1').value.trim(),
+    rat1_eyes_path: document.getElementById('cfgRat1Eyes').value.trim(),
+    rat2_mesh_path: document.getElementById('cfgRat2').value.trim(),
+    rat2_eyes_path: document.getElementById('cfgRat2Eyes').value.trim(),
+  };
+  if (!cfg.env_mesh_path || !cfg.calib_json_path) {
+    alert('environment mesh path and calibration JSON path are required');
+    return;
+  }
+  await fetch(`${SETUP_API}/api/config`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+  document.getElementById('setupOverlay').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+  window.__enterScene(cfg);
+});
+
+prefillSetup();
+</script>
+</body>
+</html>

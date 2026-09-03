@@ -1,0 +1,13 @@
+{
+  "name": "gui_3_scene_placement",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/app.js --bundle --outfile=bundle.js --format=iife"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  }
+}

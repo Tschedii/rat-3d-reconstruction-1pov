@@ -1,0 +1,752 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GUI 4 — eye marking + FOV</title>
+<style>
+  :root {
+    --bg: #15140f; --bg-elevated: #1e1c15; --text: #f1ede1; --text-dim: #9c9686;
+    --accent: #c9a13b; --border: #34311f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; height: 100vh; width: 100vw; }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+
+  .panel {
+    position: fixed; top: 20px; left: 20px;
+    background: rgba(30,28,21,0.85); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px;
+    max-width: 300px;
+    display: none;
+  }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px 0; }
+  .title { font-size: 17px; font-weight: 600; margin: 0 0 12px 0; }
+
+  .nav-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .nav-row button { font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+  .nav-row button:hover { border-color: var(--accent); }
+  .nav-row button:disabled { opacity: 0.4; cursor: default; }
+  #frameLabel { font-family: var(--mono); font-size: 12.5px; flex: 1; text-align: center; }
+  #frameInput { width: 76px; font-family: var(--mono); font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; }
+
+  .progress { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; margin-left: 6px; }
+  .badge.auto { background: #3a3626; color: var(--accent); }
+  .badge.manual { background: #2a4a2e; color: #7fd18a; }
+
+  .eye-controls { padding-top: 10px; border-top: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row button { flex: 1; font-family: var(--sans); font-size: 11.5px; padding: 7px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+  .row button:hover { border-color: var(--accent); }
+  .row button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .save-row button { flex: 1; font-weight: 600; }
+  .save-row button.save { background: #2a4a2e; border-color: #3f6b46; color: #cdeed1; }
+  .reset-btn { flex: none !important; padding: 7px 10px !important; }
+  .eye-coords { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: pre; line-height: 1.5; margin-top: 6px; }
+  .autoadvance { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+  .hint { position: fixed; bottom: 18px; right: 22px; font-family: var(--mono); font-size: 11px; color: var(--text-dim); pointer-events: none; display: none; }
+  .loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 13px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+
+  /* --- setup overlay --- */
+  #setupOverlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .setup-card { width: 520px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 28px 30px; }
+  .setup-card h1 { font-size: 19px; margin: 0 0 4px 0; }
+  .radio-group { display: flex; gap: 18px; margin: 14px 0; }
+  .radio-group label { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  input[type=text] { font-family: var(--mono); font-size: 12.5px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .row2 { display: flex; gap: 12px; }
+  .row2 > * { flex: 1; }
+  .setup-card .enter-btn { width: auto; padding: 10px 22px; font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1a1608; margin-top: 6px; }
+  .setup-err { color: #e88; font-family: var(--mono); font-size: 11.5px; margin-top: 8px; min-height: 1em; }
+</style>
+</head>
+<body>
+
+<div id="setupOverlay">
+  <div class="setup-card">
+    <p class="eyebrow">Pipeline stage 4 / 4</p>
+    <h1>Eye marking + field of view — setup</h1>
+    <div class="radio-group">
+      <label><input type="radio" name="srcMode" value="single" checked> single mesh</label>
+      <label><input type="radio" name="srcMode" value="range"> range of meshes</label>
+    </div>
+    <div id="singleFields">
+      <div class="field"><label>mesh_preview.ply path (or its frame folder)</label><input type="text" id="cfgMeshPath" placeholder="/path/to/frame_002917/mesh_preview.ply"></div>
+    </div>
+    <div id="rangeFields" style="display:none;">
+      <div class="field"><label>root folder (contains frame_XXXXXX/ subfolders)</label><input type="text" id="cfgRootDir" placeholder="/path/to/object_1/output"></div>
+      <div class="row2">
+        <div class="field"><label>start frame #</label><input type="text" id="cfgStart" placeholder="2900"></div>
+        <div class="field"><label>end frame #</label><input type="text" id="cfgEnd" placeholder="2950"></div>
+      </div>
+    </div>
+    <div class="field"><label>object label (used to keep saved eye positions separate — optional)</label><input type="text" id="cfgLabel" placeholder="object_1"></div>
+    <button class="enter-btn" id="enterBtn">Load</button>
+    <div class="setup-err" id="setupErr"></div>
+  </div>
+</div>
+
+<div id="stage"><canvas id="gl"></canvas></div>
+
+<div class="panel" id="mainPanel">
+  <p class="eyebrow">Batch eye placement</p>
+  <p class="title" id="titleLine">frame / mesh_preview.ply</p>
+
+  <div class="nav-row">
+    <button id="prevBtn">&larr; prev</button>
+    <span id="frameLabel">-</span>
+    <button id="nextBtn">next &rarr;</button>
+  </div>
+  <div class="nav-row">
+    <input id="frameInput" type="text" placeholder="frame_0060">
+    <button id="jumpBtn">jump</button>
+    <span id="sourceBadge"></span>
+  </div>
+  <div class="progress" id="progress">loading frame list…</div>
+
+  <div class="eye-controls">
+    <div class="row">
+      <button id="markL" type="button">Mark left eye</button>
+      <button id="markR" type="button">Mark right eye</button>
+      <button id="markReset" class="reset-btn" type="button" title="Reset to auto estimate">&#8634;</button>
+    </div>
+    <div class="row save-row">
+      <button id="saveBtn" class="save" type="button">Save this frame</button>
+    </div>
+    <label class="autoadvance"><input type="checkbox" id="autoAdvance" checked> auto-advance to next frame after saving</label>
+    <div class="eye-coords" id="eyeCoords"></div>
+  </div>
+</div>
+
+<div class="hint" id="hint">drag to orbit &middot; scroll to zoom</div>
+<div class="loading" id="loading" style="display:none;">Loading&hellip;</div>
+
+<script>
+document.querySelectorAll('input[name=srcMode]').forEach(r => r.addEventListener('change', () => {
+  const mode = document.querySelector('input[name=srcMode]:checked').value;
+  document.getElementById('singleFields').style.display = mode === 'single' ? 'block' : 'none';
+  document.getElementById('rangeFields').style.display = mode === 'range' ? 'block' : 'none';
+}));
+
+document.getElementById('enterBtn').addEventListener('click', async () => {
+  const mode = document.querySelector('input[name=srcMode]:checked').value;
+  const payload = { mode, object_label: document.getElementById('cfgLabel').value.trim() };
+  if (mode === 'single') {
+    payload.mesh_path = document.getElementById('cfgMeshPath').value.trim();
+    if (!payload.mesh_path) { document.getElementById('setupErr').textContent = 'mesh path required'; return; }
+  } else {
+    payload.root_dir = document.getElementById('cfgRootDir').value.trim();
+    payload.frame_start = document.getElementById('cfgStart').value.trim();
+    payload.frame_end = document.getElementById('cfgEnd').value.trim();
+    if (!payload.root_dir || !payload.frame_start || !payload.frame_end) {
+      document.getElementById('setupErr').textContent = 'root folder and start/end frame required'; return;
+    }
+  }
+  const res = await fetch('http://127.0.0.1:8974/api/set_source', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) { document.getElementById('setupErr').textContent = data.error; return; }
+  document.getElementById('setupOverlay').style.display = 'none';
+  document.getElementById('mainPanel').style.display = 'block';
+  document.getElementById('hint').style.display = 'block';
+  window.__startViewer();
+});
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var API = "http://127.0.0.1:8974";
+
+  function vsub(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
+  function vadd(a,b){ return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
+  function vscale(a,s){ return [a[0]*s,a[1]*s,a[2]*s]; }
+  function vcross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+  function vlen(a){ return Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]); }
+  function vnorm(a){ var l=vlen(a)||1; return [a[0]/l,a[1]/l,a[2]/l]; }
+  function vdot(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+  function transformVec4(m, v) {
+    return [
+      m[0]*v[0]+m[4]*v[1]+m[8]*v[2]+m[12]*v[3],
+      m[1]*v[0]+m[5]*v[1]+m[9]*v[2]+m[13]*v[3],
+      m[2]*v[0]+m[6]*v[1]+m[10]*v[2]+m[14]*v[3],
+      m[3]*v[0]+m[7]*v[1]+m[11]*v[2]+m[15]*v[3]
+    ];
+  }
+
+  var mat4 = {
+    create: function () { return new Float32Array(16); },
+    identity: function (o) { o.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); return o; },
+    perspective: function (o, fovy, aspect, near, far) {
+      var f = 1.0 / Math.tan(fovy / 2), nf = 1 / (near - far);
+      o.set([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+      return o;
+    },
+    lookAt: function (o, eye, center, up) {
+      var z0=eye[0]-center[0], z1=eye[1]-center[1], z2=eye[2]-center[2];
+      var len = Math.hypot(z0,z1,z2); z0/=len; z1/=len; z2/=len;
+      var x0=up[1]*z2-up[2]*z1, x1=up[2]*z0-up[0]*z2, x2=up[0]*z1-up[1]*z0;
+      len = Math.hypot(x0,x1,x2); if (len) { x0/=len; x1/=len; x2/=len; }
+      var y0=z1*x2-z2*x1, y1=z2*x0-z0*x2, y2=z0*x1-z1*x0;
+      o.set([x0,y0,z0,0, x1,y1,z1,0, x2,y2,z2,0,
+        -(x0*eye[0]+x1*eye[1]+x2*eye[2]),
+        -(y0*eye[0]+y1*eye[1]+y2*eye[2]),
+        -(z0*eye[0]+z1*eye[1]+z2*eye[2]), 1]);
+      return o;
+    },
+    multiply: function (o, a, b) {
+      var r = new Float32Array(16);
+      for (var i = 0; i < 4; i++) {
+        for (var j = 0; j < 4; j++) {
+          r[i*4+j] = a[0*4+j]*b[i*4+0] + a[1*4+j]*b[i*4+1] + a[2*4+j]*b[i*4+2] + a[3*4+j]*b[i*4+3];
+        }
+      }
+      o.set(r);
+      return o;
+    },
+    normalFromMat4: function (o, m) {
+      o[0]=m[0]; o[1]=m[1]; o[2]=m[2];
+      o[3]=m[4]; o[4]=m[5]; o[5]=m[6];
+      o[6]=m[8]; o[7]=m[9]; o[8]=m[10];
+      return o;
+    }
+  };
+
+  function compileShader(gl, type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+
+  var VERT_SRC = [
+    "attribute vec3 aPosition;", "attribute vec3 aNormal;", "attribute vec3 aColor;",
+    "uniform mat4 uModelView;", "uniform mat4 uProjection;", "uniform mat3 uNormalMatrix;",
+    "varying vec3 vNormal;", "varying vec3 vColor;", "varying vec3 vViewPos;",
+    "void main() {",
+    "  vec4 viewPos = uModelView * vec4(aPosition, 1.0);",
+    "  vViewPos = viewPos.xyz;",
+    "  vNormal = normalize(uNormalMatrix * aNormal);",
+    "  vColor = aColor;",
+    "  gl_Position = uProjection * viewPos;",
+    "}"
+  ].join("\n");
+
+  var FRAG_SRC = [
+    "precision mediump float;", "varying vec3 vNormal;", "varying vec3 vColor;", "varying vec3 vViewPos;",
+    "void main() {",
+    "  vec3 N = normalize(vNormal);",
+    "  if (!gl_FrontFacing) N = -N;",
+    "  vec3 V = normalize(-vViewPos);",
+    "  vec3 keyDir = normalize(vec3(0.5, 0.8, 1.0));",
+    "  vec3 fillDir = normalize(vec3(-0.6, -0.2, 0.6));",
+    "  float key = max(dot(N, keyDir), 0.0);",
+    "  float fill = max(dot(N, fillDir), 0.0) * 0.35;",
+    "  vec3 H = normalize(keyDir + V);",
+    "  float spec = pow(max(dot(N, H), 0.0), 40.0) * 0.06;",
+    "  float ambient = 0.28;",
+    "  float light = ambient + key * 0.75 + fill;",
+    "  vec3 outColor = vColor * light + vec3(spec);",
+    "  gl_FragColor = vec4(outColor, 1.0);",
+    "}"
+  ].join("\n");
+
+  var FOV_VERT_SRC = [
+    "attribute vec3 aPosition;", "uniform mat4 uModelView;", "uniform mat4 uProjection;",
+    "void main() { gl_Position = uProjection * uModelView * vec4(aPosition, 1.0); }"
+  ].join("\n");
+  var FOV_FRAG_SRC = [
+    "precision mediump float;", "uniform vec4 uColor;",
+    "void main() { gl_FragColor = uColor; }"
+  ].join("\n");
+
+  function buildFovCap(center, axis, halfAngleRad, radius, segsTheta, segsPhi) {
+    axis = vnorm(axis);
+    var arbitrary = Math.abs(axis[2]) < 0.9 ? [0,0,1] : [1,0,0];
+    var u = vnorm(vcross(arbitrary, axis));
+    var v = vcross(axis, u);
+    var positions = [], indices = [];
+    for (var i = 0; i <= segsTheta; i++) {
+      var theta = halfAngleRad * i / segsTheta;
+      var ct = Math.cos(theta), st = Math.sin(theta);
+      for (var j = 0; j <= segsPhi; j++) {
+        var phi = 2 * Math.PI * j / segsPhi;
+        var ring = vadd(vscale(u, Math.cos(phi)), vscale(v, Math.sin(phi)));
+        var dir = vadd(vscale(axis, ct), vscale(ring, st));
+        var p = vadd(center, vscale(dir, radius));
+        positions.push(p[0], p[1], p[2]);
+      }
+    }
+    for (i = 0; i < segsTheta; i++) {
+      for (j = 0; j < segsPhi; j++) {
+        var a = i * (segsPhi + 1) + j, b = a + segsPhi + 1;
+        indices.push(a, b, a + 1,  a + 1, b, b + 1);
+      }
+    }
+    return { positions: new Float32Array(positions), indices: new Uint16Array(indices) };
+  }
+
+  // ---- binary PLY parser (matches mesh_preview.ply's fixed layout:
+  // double x,y,z,nx,ny,nz + uchar r,g,b per vertex; uchar count + 3x
+  // uint32 per face) ----
+  function parsePly(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var headStr = "";
+    for (var k = 0; k < Math.min(bytes.length, 2000); k++) headStr += String.fromCharCode(bytes[k]);
+    var endMarker = "end_header\n";
+    var endIdx = headStr.indexOf(endMarker) + endMarker.length;
+    var nVerts = parseInt(headStr.match(/element vertex (\d+)/)[1], 10);
+    var nFaces = parseInt(headStr.match(/element face (\d+)/)[1], 10);
+
+    var dv = new DataView(buffer);
+    var off = endIdx;
+    var positions = new Float32Array(nVerts * 3);
+    var normals = new Float32Array(nVerts * 3);
+    var colors = new Uint8Array(nVerts * 3);
+    for (var i = 0; i < nVerts; i++) {
+      positions[i*3]   = dv.getFloat64(off, true); off += 8;
+      positions[i*3+1] = dv.getFloat64(off, true); off += 8;
+      positions[i*3+2] = dv.getFloat64(off, true); off += 8;
+      normals[i*3]   = dv.getFloat64(off, true); off += 8;
+      normals[i*3+1] = dv.getFloat64(off, true); off += 8;
+      normals[i*3+2] = dv.getFloat64(off, true); off += 8;
+      colors[i*3]   = dv.getUint8(off); off += 1;
+      colors[i*3+1] = dv.getUint8(off); off += 1;
+      colors[i*3+2] = dv.getUint8(off); off += 1;
+    }
+    var indices = new Uint32Array(nFaces * 3);
+    for (i = 0; i < nFaces; i++) {
+      off += 1; // vertex count byte, assumed 3
+      indices[i*3]   = dv.getUint32(off, true); off += 4;
+      indices[i*3+1] = dv.getUint32(off, true); off += 4;
+      indices[i*3+2] = dv.getUint32(off, true); off += 4;
+    }
+    var colorsF = new Float32Array(colors.length);
+    for (i = 0; i < colors.length; i++) colorsF[i] = colors[i] / 255;
+    return { positions: positions, normals: normals, colors: colorsF, indices: indices, nVerts: nVerts, nFaces: nFaces };
+  }
+
+  var FOV_HALF_ANGLE = 100 * Math.PI / 180;
+
+  function App() {
+    var canvas = document.getElementById("gl");
+    var gl = canvas.getContext("webgl", { antialias: true }) || canvas.getContext("experimental-webgl");
+    if (!gl) { document.getElementById("loading").textContent = "WebGL not available."; return; }
+    var ext = gl.getExtension("OES_element_index_uint");
+    if (!ext) { document.getElementById("loading").textContent = "Missing WebGL extension."; return; }
+
+    var program, aPosition, aNormal, aColor, uModelView, uProjection, uNormalMatrix;
+    var fovProgram, fovAPosition, fovUModelView, fovUProjection, fovUColor;
+
+    function makeBuffer(data, target) {
+      var buf = gl.createBuffer();
+      gl.bindBuffer(target || gl.ARRAY_BUFFER, buf);
+      gl.bufferData(target || gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      return buf;
+    }
+    function updateBuffer(buf, data) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+    }
+
+    (function initPrograms() {
+      var vs = compileShader(gl, gl.VERTEX_SHADER, VERT_SRC);
+      var fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+      program = gl.createProgram();
+      gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+      aPosition = gl.getAttribLocation(program, "aPosition");
+      aNormal = gl.getAttribLocation(program, "aNormal");
+      aColor = gl.getAttribLocation(program, "aColor");
+      uModelView = gl.getUniformLocation(program, "uModelView");
+      uProjection = gl.getUniformLocation(program, "uProjection");
+      uNormalMatrix = gl.getUniformLocation(program, "uNormalMatrix");
+
+      var vs2 = compileShader(gl, gl.VERTEX_SHADER, FOV_VERT_SRC);
+      var fs2 = compileShader(gl, gl.FRAGMENT_SHADER, FOV_FRAG_SRC);
+      fovProgram = gl.createProgram();
+      gl.attachShader(fovProgram, vs2); gl.attachShader(fovProgram, fs2); gl.linkProgram(fovProgram);
+      if (!gl.getProgramParameter(fovProgram, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(fovProgram));
+      fovAPosition = gl.getAttribLocation(fovProgram, "aPosition");
+      fovUModelView = gl.getUniformLocation(fovProgram, "uModelView");
+      fovUProjection = gl.getUniformLocation(fovProgram, "uProjection");
+      fovUColor = gl.getUniformLocation(fovProgram, "uColor");
+    })();
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+
+    // ---- mesh state (rebuilt on every frame load) ----
+    var posBuf = gl.createBuffer(), normBuf = gl.createBuffer(), colorBuf = gl.createBuffer(), idxBuf = gl.createBuffer();
+    var capLPosBuf = makeBuffer(new Float32Array(0)), capLIdxBuf = makeBuffer(new Uint16Array(0), gl.ELEMENT_ARRAY_BUFFER);
+    var capRPosBuf = makeBuffer(new Float32Array(0)), capRIdxBuf = makeBuffer(new Uint16Array(0), gl.ELEMENT_ARRAY_BUFFER);
+    var eyeDotLPosBuf = makeBuffer(new Float32Array(0)), eyeDotLIdxBuf = makeBuffer(new Uint16Array(0), gl.ELEMENT_ARRAY_BUFFER);
+    var eyeDotRPosBuf = makeBuffer(new Float32Array(0)), eyeDotRIdxBuf = makeBuffer(new Uint16Array(0), gl.ELEMENT_ARRAY_BUFFER);
+    var capL = {indices:[]}, capR = {indices:[]}, eyeDotL = {indices:[]}, eyeDotR = {indices:[]};
+
+    var meshData = null;         // current parsed PLY
+    var nFacesCurrent = 0;
+    var eyeL = null, eyeR = null, headForward = [0,1,0], headRight = null, headUp = [0,0,1];
+    var currentFallbackForward = [0,1,0];
+    var currentSource = "auto";
+    var fovRadius = 0.06;
+
+    function eyeAxis(lateral, azimuthDeg, elevationDeg, forward, up) {
+      var az = azimuthDeg * Math.PI / 180, el = elevationDeg * Math.PI / 180;
+      var horiz = vadd(vscale(lateral, Math.cos(az)), vscale(forward, Math.sin(az)));
+      return vnorm(vadd(vscale(horiz, Math.cos(el)), vscale(up, Math.sin(el))));
+    }
+
+    function recomputeFov() {
+      if (!eyeL || !eyeR) return;
+      // headForward is guaranteed non-null here (applyEntry always seeds a
+      // fallback derived from the mesh's own bounding box when no prior
+      // entry exists), so this no longer throws on a brand-new frame the
+      // way the original tool did.
+      headRight = vnorm(vsub(eyeL, eyeR));
+      var fRaw = vsub(headForward, vscale(headRight, vdot(headForward, headRight)));
+      if (vlen(fRaw) > 1e-6) headForward = vnorm(fRaw);
+      var axisL = eyeAxis(headRight, 20, 25, headForward, headUp);
+      var axisR = eyeAxis(vscale(headRight,-1), 20, 25, headForward, headUp);
+
+      capL = buildFovCap(eyeL, axisL, FOV_HALF_ANGLE, fovRadius, 26, 36);
+      capR = buildFovCap(eyeR, axisR, FOV_HALF_ANGLE, fovRadius, 26, 36);
+      updateBuffer(capLPosBuf, capL.positions);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, capLIdxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, capL.indices, gl.DYNAMIC_DRAW);
+      updateBuffer(capRPosBuf, capR.positions);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, capRIdxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, capR.indices, gl.DYNAMIC_DRAW);
+
+      eyeDotL = buildFovCap(eyeL, axisL, Math.PI, fovRadius*0.05, 8, 12);
+      eyeDotR = buildFovCap(eyeR, axisR, Math.PI, fovRadius*0.05, 8, 12);
+      updateBuffer(eyeDotLPosBuf, eyeDotL.positions);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, eyeDotLIdxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, eyeDotL.indices, gl.DYNAMIC_DRAW);
+      updateBuffer(eyeDotRPosBuf, eyeDotR.positions);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, eyeDotRIdxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, eyeDotR.indices, gl.DYNAMIC_DRAW);
+
+      var el = document.getElementById("eyeCoords");
+      function fmt(p) { return "[" + p[0].toFixed(4) + ", " + p[1].toFixed(4) + ", " + p[2].toFixed(4) + "]"; }
+      el.textContent = "eyeL " + fmt(eyeL) + "\neyeR " + fmt(eyeR);
+    }
+
+    function drawFovMesh(posBuf2, idxBuf2, indexCount, color) {
+      if (indexCount === 0) return;
+      gl.useProgram(fovProgram);
+      gl.uniformMatrix4fv(fovUModelView, false, modelViewMat);
+      gl.uniformMatrix4fv(fovUProjection, false, projMat);
+      gl.uniform4fv(fovUColor, color);
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf2);
+      gl.enableVertexAttribArray(fovAPosition);
+      gl.vertexAttribPointer(fovAPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf2);
+      gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    // ---- camera ----
+    var yaw = 0.75, pitch = 0.6, distance = 0.4, target = [0,0,0];
+    var camEye = [0,0,distance];
+    var dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, moved = 0;
+    var markMode = null;
+
+    canvas.addEventListener("pointerdown", function (e) {
+      dragging = true; lastX = e.clientX; lastY = e.clientY; downX = e.clientX; downY = e.clientY; moved = 0;
+      canvas.setPointerCapture(e.pointerId);
+      if (!markMode) hint.style.opacity = "0.35";
+    });
+    canvas.addEventListener("pointerup", function (e) {
+      dragging = false;
+      if (markMode && moved < 6) {
+        var picked = pickVertexOnMesh(e.clientX, e.clientY);
+        if (picked) { if (markMode === "L") eyeL = picked; else eyeR = picked; recomputeFov(); }
+        setMarkMode(null);
+      }
+    });
+    canvas.addEventListener("pointercancel", function () { dragging = false; });
+    canvas.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      moved += Math.abs(dx) + Math.abs(dy);
+      yaw -= dx * 0.006; pitch -= dy * 0.006;
+      var lim = Math.PI/2 - 0.05;
+      if (pitch > lim) pitch = lim; if (pitch < -lim) pitch = -lim;
+    });
+    canvas.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      distance *= Math.pow(1.0015, e.deltaY);
+      distance = Math.max(0.05, Math.min(2, distance));
+    }, { passive: false });
+
+    var hint = document.getElementById("hint");
+
+    function pickVertexOnMesh(clientX, clientY) {
+      if (!meshData) return null;
+      var rect = canvas.getBoundingClientRect();
+      var mx = (clientX - rect.left) / rect.width * canvas.width;
+      var my = (clientY - rect.top) / rect.height * canvas.height;
+      var maxPickPx = 40;
+      var bestIdx = -1, bestD = maxPickPx * maxPickPx;
+      var positions = meshData.positions, normals = meshData.normals;
+      for (var i = 0; i < meshData.nVerts; i++) {
+        var i3 = i*3;
+        var px = positions[i3], py = positions[i3+1], pz = positions[i3+2];
+        var nx = normals[i3], ny = normals[i3+1], nz = normals[i3+2];
+        var vdx = camEye[0]-px, vdy = camEye[1]-py, vdz = camEye[2]-pz;
+        var vlenN = Math.sqrt(vdx*vdx+vdy*vdy+vdz*vdz) || 1;
+        var facing = (nx*vdx+ny*vdy+nz*vdz) / vlenN;
+        if (facing <= 0.05) continue;
+        var vp = transformVec4(modelViewMat, [px,py,pz,1]);
+        var cp = transformVec4(projMat, vp);
+        if (cp[3] <= 0.0001) continue;
+        var sx = (cp[0]/cp[3]*0.5+0.5) * canvas.width;
+        var sy = (1-(cp[1]/cp[3]*0.5+0.5)) * canvas.height;
+        var dx = sx-mx, dy = sy-my;
+        var d = dx*dx+dy*dy;
+        if (d < bestD) { bestD = d; bestIdx = i; }
+      }
+      if (bestIdx < 0) return null;
+      var b3 = bestIdx*3;
+      return [positions[b3], positions[b3+1], positions[b3+2]];
+    }
+
+    var markLBtn = document.getElementById("markL");
+    var markRBtn = document.getElementById("markR");
+    var markResetBtn = document.getElementById("markReset");
+    function setMarkMode(mode) {
+      markMode = mode;
+      markLBtn.classList.toggle("active", mode === "L");
+      markRBtn.classList.toggle("active", mode === "R");
+      hint.textContent = mode ? "click the mesh to place the " + (mode === "L" ? "left" : "right") + " eye" : "drag to orbit · scroll to zoom";
+      hint.style.opacity = "1";
+    }
+    markLBtn.addEventListener("click", function () { setMarkMode(markMode === "L" ? null : "L"); });
+    markRBtn.addEventListener("click", function () { setMarkMode(markMode === "R" ? null : "R"); });
+    markResetBtn.addEventListener("click", function () { applyEntry(autoEstimateFor(currentFrame)); });
+
+    var projMat = mat4.create(), viewMat = mat4.create(), modelViewMat = mat4.create(), normalMat3 = new Float32Array(9);
+
+    function resize() {
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var w = canvas.clientWidth, h = canvas.clientHeight;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    function frame() {
+      resize();
+      var cp = Math.cos(pitch), sp = Math.sin(pitch);
+      var cy = Math.cos(yaw), sy = Math.sin(yaw);
+      var eye = [target[0]+distance*cp*cy, target[1]+distance*cp*sy, target[2]+distance*sp];
+      camEye = eye;
+      mat4.lookAt(viewMat, eye, target, [0,0,1]);
+      mat4.identity(modelViewMat);
+      mat4.multiply(modelViewMat, viewMat, modelViewMat);
+      mat4.normalFromMat4(normalMat3, modelViewMat);
+      var aspect = canvas.width / canvas.height;
+      mat4.perspective(projMat, Math.PI/5.2, aspect, 0.01, 10);
+
+      gl.clearColor(0,0,0,0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      if (meshData) {
+        gl.useProgram(program);
+        gl.uniformMatrix4fv(uModelView, false, modelViewMat);
+        gl.uniformMatrix4fv(uProjection, false, projMat);
+        gl.uniformMatrix3fv(uNormalMatrix, false, normalMat3);
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.enableVertexAttribArray(aPosition); gl.vertexAttribPointer(aPosition,3,gl.FLOAT,false,0,0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.enableVertexAttribArray(aNormal); gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,0,0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf); gl.enableVertexAttribArray(aColor); gl.vertexAttribPointer(aColor,3,gl.FLOAT,false,0,0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+        gl.drawElements(gl.TRIANGLES, nFacesCurrent*3, gl.UNSIGNED_INT, 0);
+
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false); gl.disable(gl.CULL_FACE);
+        drawFovMesh(capLPosBuf, capLIdxBuf, capL.indices.length, [0.25,0.62,1.0,0.3]);
+        drawFovMesh(capRPosBuf, capRIdxBuf, capR.indices.length, [1.0,0.5,0.15,0.3]);
+        gl.depthMask(true); gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE);
+        drawFovMesh(eyeDotLPosBuf, eyeDotLIdxBuf, eyeDotL.indices.length, [0.35,0.66,1.0,1.0]);
+        drawFovMesh(eyeDotRPosBuf, eyeDotRIdxBuf, eyeDotR.indices.length, [1.0,0.58,0.32,1.0]);
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // ---- frame loading / navigation / persistence ----
+    var frames = [];
+    var currentFrame = null;
+    var eyePositions = {};   // current working set (any manual saves)
+    var autoPositions = {};  // pristine auto-only snapshot, never mutated - reset target (empty for new data)
+
+    function autoEstimateFor(frameName) {
+      return autoPositions[frameName] || null;
+    }
+    function currentEntryFor(frameName) {
+      return eyePositions[frameName] || autoPositions[frameName] || null;
+    }
+
+    // Root-cause fix for the original tool's crash: on a brand-new frame
+    // with no prior manual/auto entry, headForward used to stay null, and
+    // recomputeFov() would throw a TypeError the moment both eyes were
+    // marked (vsub(null, ...)). Now applyEntry always seeds a non-null
+    // headForward - either the saved one, or (when there is no entry) a
+    // fallback derived from the mesh's own bounding-box long horizontal
+    // axis, computed fresh in loadFrame() for the frame currently on
+    // screen - so headForward is never null by the time the user places
+    // both eyes.
+    function applyEntry(entry) {
+      if (!entry) {
+        eyeL = null; eyeR = null;
+        headForward = currentFallbackForward.slice();
+        headUp = [0, 0, 1];
+        currentSource = "auto";
+        recomputeFovIfReady();
+        updateSourceBadge();
+        return;
+      }
+      eyeL = entry.eyeL.slice();
+      eyeR = entry.eyeR.slice();
+      headForward = entry.headForward.slice();
+      headUp = entry.headUp.slice();
+      currentSource = entry.source || "auto";
+      recomputeFov();
+      updateSourceBadge();
+    }
+
+    function recomputeFovIfReady() {
+      // clear any stale FOV geometry from the previous frame when the new
+      // one has no eyes marked yet
+      capL = {indices:[]}; capR = {indices:[]}; eyeDotL = {indices:[]}; eyeDotR = {indices:[]};
+      updateBuffer(capLPosBuf, new Float32Array(0));
+      updateBuffer(capRPosBuf, new Float32Array(0));
+      updateBuffer(eyeDotLPosBuf, new Float32Array(0));
+      updateBuffer(eyeDotRPosBuf, new Float32Array(0));
+      document.getElementById("eyeCoords").textContent = "";
+    }
+
+    function updateSourceBadge() {
+      var el = document.getElementById("sourceBadge");
+      el.innerHTML = '<span class="badge ' + currentSource + '">' + currentSource + '</span>';
+    }
+
+    function updateProgress() {
+      var manual = 0;
+      for (var k in eyePositions) if (eyePositions[k].source === "manual") manual++;
+      document.getElementById("progress").textContent = manual + " / " + frames.length + " manually corrected";
+    }
+
+    function updateNav() {
+      var idx = frames.indexOf(currentFrame);
+      document.getElementById("frameLabel").textContent = currentFrame + "  (" + (idx+1) + "/" + frames.length + ")";
+      document.getElementById("prevBtn").disabled = idx <= 0;
+      document.getElementById("nextBtn").disabled = idx >= frames.length - 1;
+    }
+
+    function loadFrame(frameName) {
+      currentFrame = frameName;
+      setMarkMode(null);
+      document.getElementById("loading").style.display = "flex";
+      document.getElementById("loading").textContent = "Loading " + frameName + "…";
+      fetch(API + "/" + frameName + "/mesh_preview.ply")
+        .then(function (r) { return r.arrayBuffer(); })
+        .then(function (buf) {
+          meshData = parsePly(buf);
+          nFacesCurrent = meshData.nFaces;
+          gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, meshData.positions, gl.STATIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, meshData.normals, gl.STATIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf); gl.bufferData(gl.ARRAY_BUFFER, meshData.colors, gl.STATIC_DRAW);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, meshData.indices, gl.STATIC_DRAW);
+
+          // frame the camera on this mesh's own bounding box
+          var minB = [Infinity,Infinity,Infinity], maxB = [-Infinity,-Infinity,-Infinity];
+          for (var i = 0; i < meshData.nVerts; i++) {
+            for (var a = 0; a < 3; a++) {
+              var v = meshData.positions[i*3+a];
+              if (v < minB[a]) minB[a] = v;
+              if (v > maxB[a]) maxB[a] = v;
+            }
+          }
+          target = [(minB[0]+maxB[0])/2, (minB[1]+maxB[1])/2, (minB[2]+maxB[2])/2];
+          var diag = vlen(vsub(maxB, minB));
+          distance = diag * 1.3;
+          fovRadius = diag * 0.35;
+
+          // fallback body-axis direction for brand-new frames: the longer
+          // of the mesh's own horizontal (X/Y) bounding-box extents,
+          // matching this project's Z-up mesh convention.
+          var extentX = maxB[0]-minB[0], extentY = maxB[1]-minB[1];
+          currentFallbackForward = extentX > extentY ? [1,0,0] : [0,1,0];
+
+          applyEntry(currentEntryFor(frameName));
+          updateNav();
+          updateSourceBadge();
+          document.getElementById("loading").style.display = "none";
+        });
+    }
+
+    function saveCurrentFrame() {
+      if (!eyeL || !eyeR) return;
+      currentSource = "manual";
+      updateSourceBadge();
+      var payload = {
+        frame: currentFrame, eyeL: eyeL, eyeR: eyeR,
+        headForward: headForward, headRight: headRight, headUp: headUp,
+        source: "manual"
+      };
+      eyePositions[currentFrame] = { eyeL: eyeL, eyeR: eyeR, headForward: headForward, headRight: headRight, headUp: headUp, source: "manual" };
+      updateProgress();
+      fetch(API + "/api/save_eye", { method: "POST", body: JSON.stringify(payload) })
+        .then(function () {
+          if (document.getElementById("autoAdvance").checked) goRelative(1);
+        });
+    }
+
+    function goRelative(delta) {
+      var idx = frames.indexOf(currentFrame) + delta;
+      if (idx < 0 || idx >= frames.length) return;
+      loadFrame(frames[idx]);
+    }
+
+    document.getElementById("prevBtn").addEventListener("click", function () { goRelative(-1); });
+    document.getElementById("nextBtn").addEventListener("click", function () { goRelative(1); });
+    document.getElementById("saveBtn").addEventListener("click", saveCurrentFrame);
+    document.getElementById("jumpBtn").addEventListener("click", function () {
+      var v = document.getElementById("frameInput").value.trim();
+      var target2 = v.indexOf("frame_") === 0 ? v : "frame_" + v.padStart(4, "0");
+      if (frames.indexOf(target2) >= 0) loadFrame(target2);
+      else alert("no such frame: " + target2);
+    });
+
+    Promise.all([
+      fetch(API + "/api/frames").then(function (r) { return r.json(); }),
+      fetch(API + "/api/eye_positions").then(function (r) { return r.json(); }),
+      fetch(API + "/api/eye_positions_auto").then(function (r) { return r.json(); })
+    ]).then(function (results) {
+      frames = results[0];
+      eyePositions = results[1];
+      autoPositions = results[2];
+      updateProgress();
+      loadFrame(frames[0]);
+    }).catch(function (e) {
+      document.getElementById("loading").style.display = "flex";
+      document.getElementById("loading").textContent = "Could not reach " + API + " - is eye_marker_server.py running?";
+    });
+  }
+
+  window.__startViewer = function () { App(); };
+})();
+</script>
+</body>
+</html>

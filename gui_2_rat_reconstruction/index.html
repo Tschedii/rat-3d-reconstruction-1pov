@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GUI 2 — rat mesh reconstruction</title>
+<style>
+  :root {
+    --bg: #15140f; --bg-elevated: #1e1c15; --text: #f1ede1; --text-dim: #9c9686;
+    --accent: #c9a13b; --border: #34311f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 24px 60px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px 0; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 22px 0; }
+  .card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }
+  .section-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; font-family: var(--mono); }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  input[type=text], input[type=number] {
+    font-family: var(--mono); font-size: 12.5px; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 16px; }
+  .row > * { flex: 1; }
+  .radio-group { display: flex; gap: 18px; margin-bottom: 12px; }
+  .radio-group label { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
+  .params-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 16px; }
+  button { font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 10px 18px; border-radius: 7px;
+    border: 1px solid var(--accent); background: var(--accent); color: #1a1608; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #log { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); background: #100f0b;
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px; height: 260px; overflow-y: auto; white-space: pre-wrap; }
+  .status-badge { font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); }
+  .status-idle { color: var(--text-dim); }
+  .status-running { color: #f4a261; border-color: #f4a261; }
+  .status-done { color: #7fd79a; border-color: #7fd79a; }
+  .status-error { color: #e88; border-color: #e88; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 500; }
+  .ok { color: #7fd79a; } .err { color: #e88; }
+  .hint { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); line-height: 1.6; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Pipeline stage 2 / 4</p>
+  <h1>Rat mesh reconstruction (visual hull)</h1>
+
+  <div class="card">
+    <div class="section-label">Inputs</div>
+    <div class="field">
+      <label>silhouette masks root folder</label>
+      <input type="text" id="masksRoot" placeholder="/path/to/cutouts_or_masks_root">
+    </div>
+    <div class="field">
+      <label>calibration JSON (from GUI 1)</label>
+      <input type="text" id="calibJson" placeholder="/path/to/2026_08_27.json">
+    </div>
+    <div class="field">
+      <label>output folder</label>
+      <input type="text" id="outputRoot">
+    </div>
+    <div class="hint">expects rat_&lt;object_id&gt;/frame_XXXXXX/&lt;camera_name&gt;.png (or frame_XXXXXX/cutouts/rat_&lt;object_id&gt;/&lt;camera_name&gt;.png) under the masks root -- the existing segmentation tool's output convention.</div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Object</div>
+    <div class="radio-group">
+      <label><input type="radio" name="objectId" value="1" checked> object 1</label>
+      <label><input type="radio" name="objectId" value="2"> object 2</label>
+    </div>
+
+    <div class="section-label">Mode</div>
+    <div class="radio-group">
+      <label><input type="radio" name="mode" value="single" checked> single frame</label>
+      <label><input type="radio" name="mode" value="sequence"> sequence of frames</label>
+    </div>
+
+    <div id="singleFields" class="field" style="max-width:240px;">
+      <label>frame id</label>
+      <input type="text" id="frameId" placeholder="frame_002917">
+    </div>
+    <div id="sequenceFields" class="row" style="display:none;">
+      <div class="field"><label>start frame #</label><input type="number" id="seqStart" placeholder="2900"></div>
+      <div class="field"><label>end frame #</label><input type="number" id="seqEnd" placeholder="2950"></div>
+      <div class="field"><label>step</label><input type="number" id="seqStep" value="1"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Reconstruction parameters</div>
+    <div class="params-grid" id="paramsGrid"></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
+      <button id="runBtn">Run reconstruction</button>
+      <span class="status-badge status-idle" id="statusBadge">idle</span>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <div class="section-label">Results</div>
+    <table>
+      <thead><tr><th>frame</th><th>verts</th><th>faces</th><th>output / error</th></tr></thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8972';
+let defaults = null;
+
+const PARAM_FIELDS = [
+  ["voxel_size", "voxel size (m)"],
+  ["min_cameras", "min cameras agreeing"],
+  ["half_xy", "box half-size XY (m)"],
+  ["depth_below", "box depth below centre (m)"],
+  ["depth_above", "box depth above centre (m)"],
+];
+
+async function init() {
+  defaults = await (await fetch(`${API}/api/defaults`)).json();
+  document.getElementById('outputRoot').value = defaults.output_root;
+
+  const grid = document.getElementById('paramsGrid');
+  PARAM_FIELDS.forEach(([key, label]) => {
+    const div = document.createElement('div');
+    div.className = 'field';
+    div.innerHTML = `<label>${label}</label><input type="number" step="any" id="p_${key}" value="${defaults[key]}">`;
+    grid.appendChild(div);
+  });
+
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', updateModeFields));
+}
+
+function updateModeFields() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  document.getElementById('singleFields').style.display = mode === 'single' ? 'flex' : 'none';
+  document.getElementById('sequenceFields').style.display = mode === 'sequence' ? 'flex' : 'none';
+}
+
+function collectConfig() {
+  const masksRoot = document.getElementById('masksRoot').value.trim();
+  const calibJson = document.getElementById('calibJson').value.trim();
+  if (!masksRoot || !calibJson) { alert('masks root and calibration JSON are required'); return null; }
+
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const cfg = {
+    masks_root: masksRoot,
+    calibration_json: calibJson,
+    output_root: document.getElementById('outputRoot').value.trim(),
+    object_id: document.querySelector('input[name=objectId]:checked').value,
+    mode,
+  };
+  if (mode === 'single') {
+    cfg.frame_id = document.getElementById('frameId').value.trim();
+    if (!cfg.frame_id) { alert('frame id required'); return null; }
+  } else {
+    cfg.start = parseInt(document.getElementById('seqStart').value);
+    cfg.end = parseInt(document.getElementById('seqEnd').value);
+    cfg.step = parseInt(document.getElementById('seqStep').value) || 1;
+  }
+  PARAM_FIELDS.forEach(([key]) => { cfg[key] = parseFloat(document.getElementById(`p_${key}`).value); });
+  return cfg;
+}
+
+let polling = null;
+
+async function run() {
+  const cfg = collectConfig();
+  if (!cfg) return;
+  const res = await fetch(`${API}/api/run`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+  });
+  if (!res.ok) { const err = await res.json(); alert(`Could not start: ${err.error}`); return; }
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('resultsCard').style.display = 'none';
+  if (polling) clearInterval(polling);
+  polling = setInterval(poll, 800);
+}
+
+async function poll() {
+  const state = await (await fetch(`${API}/api/progress`)).json();
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = state.status;
+  badge.className = `status-badge status-${state.status}`;
+  document.getElementById('log').textContent = state.log.join('\n');
+  document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+
+  const body = document.getElementById('resultsBody');
+  body.innerHTML = '';
+  state.results.forEach(r => {
+    const tr = document.createElement('tr');
+    if (r.error) {
+      tr.innerHTML = `<td>${r.frame_id}</td><td>-</td><td>-</td><td class="err">${r.error}</td>`;
+    } else {
+      tr.innerHTML = `<td>${r.frame_id}</td><td>${r.verts.toLocaleString()}</td><td>${r.faces.toLocaleString()}</td><td class="ok">${r.output_path}</td>`;
+    }
+    body.appendChild(tr);
+  });
+  if (state.results.length) document.getElementById('resultsCard').style.display = 'block';
+
+  if (state.status === 'done' || state.status === 'error') {
+    clearInterval(polling);
+    document.getElementById('runBtn').disabled = false;
+  }
+}
+
+document.getElementById('runBtn').addEventListener('click', run);
+init();
+poll();
+</script>
+</body>
+</html>
