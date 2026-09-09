@@ -11,7 +11,7 @@ python server.py   # http://127.0.0.1:8972
 | File | Role |
 |---|---|
 | `server.py` | HTTP API (`/api/run`, `/api/progress`, `/api/defaults`) + background pipeline thread |
-| `reconstruction_lib.py` | Mask loading, automatic centroid triangulation, voxel carving, marching cubes |
+| `reconstruction_lib.py` | Mask loading, automatic centroid triangulation, voxel carving, marching cubes, fur-colour vertex sampling |
 | `index.html` | Frontend — pick calibration + masks, choose frame(s), launch, watch progress |
 
 Reads from `data/calibration/output/*.json` + `data/masks/`, writes to

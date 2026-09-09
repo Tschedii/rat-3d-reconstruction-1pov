@@ -54,9 +54,11 @@ found.
 
 ## Meshes — `meshes/`
 - `rat/object_<id>/frame_XXXXXX/mesh.obj` — visual-hull mesh written by
-  **GUI 2**. For **GUI 4** (eye marking), point it at a per-frame preview
-  named `mesh_preview.ply` (a lightweight/decimated version of the same
-  mesh works well for smooth interactive marking).
+  **GUI 2**, coloured with real fur colour per vertex (sampled from the
+  same cutouts used for carving) unless "colour mesh" is unchecked. For
+  **GUI 4** (eye marking), point it at a per-frame preview named
+  `mesh_preview.ply` (a lightweight/decimated version of the same mesh
+  works well for smooth interactive marking).
 - `environment/` — your static scene mesh (arena, box, table — `.obj` /
   `.mtl` / textures), placed manually. Loaded by **GUI 3**.
 

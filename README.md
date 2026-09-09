@@ -205,8 +205,14 @@ hull** approach.
    from the masks (no manual seed point needed), a voxel grid around it is
    carved down using all camera silhouettes (`min_cameras` agreement
    required to keep a voxel), the largest connected component is kept, and
-   **marching cubes** extracts the final surface.
-4. Result: `data/meshes/rat/object_<id>/frame_XXXXXX/mesh.obj`.
+   **marching cubes** extracts the final surface. With "colour mesh"
+   checked (the default), each vertex is then reprojected into every
+   camera and coloured from whichever cutouts see it as fur — the masks
+   double as the colour source, so no separate video access is needed.
+4. Result: `data/meshes/rat/object_<id>/frame_XXXXXX/mesh.obj`, with real
+   fur colour baked into the mesh as a "v x y z r g b" vertex-colour
+   extension (read natively by MeshLab, CloudCompare, Open3D and Blender's
+   OBJ importer).
 
 ## Stage 3 — Scene placement
 

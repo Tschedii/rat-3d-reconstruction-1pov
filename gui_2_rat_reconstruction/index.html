@@ -101,6 +101,13 @@
   <div class="card">
     <div class="section-label">Reconstruction parameters</div>
     <div class="params-grid" id="paramsGrid"></div>
+    <div class="field" style="margin-top:12px;">
+      <label style="display:flex; align-items:center; gap:7px; flex-direction:row;">
+        <input type="checkbox" id="colorMesh" checked style="width:auto;">
+        colour mesh from cutouts (fur colour)
+      </label>
+      <div class="hint">samples each vertex's RGB from whichever camera cutouts see it as foreground and writes it into the .obj as a "v x y z r g b" vertex colour -- adds a bit of runtime per frame.</div>
+    </div>
   </div>
 
   <div class="card">
@@ -142,6 +149,7 @@ const PARAM_FIELDS = [
 async function init() {
   defaults = await (await fetch(`${API}/api/defaults`)).json();
   document.getElementById('outputRoot').value = defaults.output_root;
+  document.getElementById('colorMesh').checked = defaults.color_mesh !== false;
 
   const grid = document.getElementById('paramsGrid');
   PARAM_FIELDS.forEach(([key, label]) => {
@@ -182,6 +190,7 @@ function collectConfig() {
     cfg.step = parseInt(document.getElementById('seqStep').value) || 1;
   }
   PARAM_FIELDS.forEach(([key]) => { cfg[key] = parseFloat(document.getElementById(`p_${key}`).value); });
+  cfg.color_mesh = document.getElementById('colorMesh').checked;
   return cfg;
 }
 

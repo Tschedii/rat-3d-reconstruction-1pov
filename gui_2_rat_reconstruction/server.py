@@ -64,6 +64,7 @@ def run_pipeline(cfg):
             "half_xy": float(cfg["half_xy"]),
             "depth_below": float(cfg["depth_below"]),
             "depth_above": float(cfg["depth_above"]),
+            "color_mesh": bool(cfg.get("color_mesh", True)),
         }
 
         output_root = Path(cfg.get("output_root") or OUTPUT_DIR)
@@ -75,9 +76,9 @@ def run_pipeline(cfg):
                 STATE["current_frame"] = frame_id
             try:
                 ordered = recon.match_masks_to_cameras(cameras, mask_paths)
-                verts, faces, centre = recon.reconstruct_frame(cameras, ordered, params, log=log)
+                verts, faces, centre, vertex_colors = recon.reconstruct_frame(cameras, ordered, params, log=log)
                 out_path = obj_dir / frame_id / "mesh.obj"
-                recon.save_obj(out_path, verts, faces)
+                recon.save_obj(out_path, verts, faces, colors=vertex_colors)
                 log(f"    saved {out_path}  ({len(verts):,} verts, {len(faces):,} faces)")
                 with STATE_LOCK:
                     STATE["results"].append({
@@ -152,6 +153,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({
                 "voxel_size": 0.003, "min_cameras": 4,
                 "half_xy": 0.20, "depth_below": 0.05, "depth_above": 0.20,
+                "color_mesh": True,
                 "output_root": str(OUTPUT_DIR),
             })
             return

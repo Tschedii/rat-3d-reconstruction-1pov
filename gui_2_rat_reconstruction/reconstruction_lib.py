@@ -8,7 +8,11 @@ a hand-entered RAT_CENTRE world-space seed point (produced once by a
 now-missing triangulate_both_rats.py); here it's derived automatically per
 frame by triangulating the silhouette masks' own centroids across all
 cameras, using the exact same p_cam = R @ p_world + t projection convention
-already used everywhere in this codebase (just inverted).
+already used everywhere in this codebase (just inverted). The other new
+piece is color_vertices(): each mesh vertex is reprojected into every
+camera and coloured from whichever cutouts see it as foreground, so the
+output .obj carries real fur colour (as a "v x y z r g b" vertex-color
+extension) rather than bare geometry.
 """
 
 import json
@@ -254,15 +258,33 @@ def estimate_rat_centre(cameras, mask_paths_ordered, log=print):
 # =============================================================================
 
 def load_masks(mask_paths_ordered):
-    masks = []
+    """Load each per-camera cutout and derive its foreground silhouette.
+
+    Cutouts are camera-space crops of the animal on a black background
+    (the segmentation stage's own convention) -- any non-black pixel counts
+    as foreground. That works identically for real RGB fur-colour cutouts
+    and for plain white-on-black binary masks, and (unlike a mid-grey
+    brightness threshold) doesn't drop dark fur pixels as background.
+
+    Returns (colors, masks): colors[i] is the raw BGR cutout (for vertex
+    colouring), masks[i] is the derived binary foreground mask -- both
+    None for any camera with no mask for this frame.
+    """
+    colors, masks = [], []
     for p in mask_paths_ordered:
         if p is None:
+            colors.append(None)
             masks.append(None)
             continue
-        img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-        _, binary = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-        masks.append(binary)
-    return masks
+        img = cv2.imread(str(p), cv2.IMREAD_COLOR)
+        if img is None:
+            colors.append(None)
+            masks.append(None)
+            continue
+        mask = (img.max(axis=2) > 0).astype(np.uint8) * 255
+        colors.append(img)
+        masks.append(mask)
+    return colors, masks
 
 
 def build_voxel_grid(centre, half_xy, depth_below, depth_above, voxel_size):
@@ -307,6 +329,41 @@ def carve_voxels(pts, cameras, masks, min_cameras, log=print):
     return votes >= min_cameras
 
 
+def color_vertices(verts, cameras, colors, masks, fallback=(200, 200, 200), log=print):
+    """Sample fur colour for each output mesh vertex by reprojecting it
+    into every camera (same p_cam = R @ p_world + t projection used for
+    carving) and averaging the cutout pixel colour from every camera that
+    sees it as foreground. Vertices no camera claims (e.g. fully
+    self-occluded) fall back to a neutral grey.
+
+    Returns an (N, 3) uint8 array in R, G, B order.
+    """
+    n = len(verts)
+    accum = np.zeros((n, 3), dtype=np.float64)
+    counts = np.zeros(n, dtype=np.int32)
+
+    for cam, color, mask in zip(cameras, colors, masks):
+        if color is None or mask is None:
+            continue
+        h, w = mask.shape
+        px, in_front = project_points(verts, cam["R"], cam["t"], cam["K"], cam["dist"])
+        u = np.round(px[:, 0]).astype(np.int32)
+        v = np.round(px[:, 1]).astype(np.int32)
+        inside = in_front & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+        visible = np.zeros(n, dtype=bool)
+        visible[inside] = mask[v[inside], u[inside]] > 0
+        bgr = color[v[visible], u[visible]].astype(np.float64)
+        accum[visible] += bgr[:, ::-1]  # BGR (cv2) -> RGB
+        counts[visible] += 1
+
+    has_color = counts > 0
+    out = np.tile(np.array(fallback, dtype=np.float64), (n, 1))
+    out[has_color] = accum[has_color] / counts[has_color, None]
+    if not has_color.all():
+        log(f"    {int((~has_color).sum()):,} / {n:,} vertices had no camera coverage, using fallback grey")
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def keep_largest_component(occupied, shape, log=print):
     grid = occupied.reshape(shape)
     labelled, n = ndimage.label(grid)
@@ -326,12 +383,20 @@ def voxels_to_mesh(occupied, shape, origin, voxel_size):
     return verts_world, faces
 
 
-def save_obj(path, verts, faces):
+def save_obj(path, verts, faces, colors=None):
+    """colors, if given, is an (N, 3) uint8 RGB array -- written as the
+    widely-supported (MeshLab / CloudCompare / Open3D / Blender) "v x y z
+    r g b" vertex-color extension, with r/g/b normalized to [0, 1]."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write("# Visual hull reconstruction\n")
-        for v in verts:
-            f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
+        if colors is not None:
+            rgb = colors.astype(np.float64) / 255.0
+            for v, c in zip(verts, rgb):
+                f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f} {c[0]:.4f} {c[1]:.4f} {c[2]:.4f}\n")
+        else:
+            for v in verts:
+                f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
         for face in faces:
             f.write(f"f {face[0]+1}//{face[0]+1} {face[1]+1}//{face[1]+1} {face[2]+1}//{face[2]+1}\n")
 
@@ -341,7 +406,7 @@ def save_obj(path, verts, faces):
 # =============================================================================
 
 def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
-    masks = load_masks(mask_paths_ordered)
+    colors, masks = load_masks(mask_paths_ordered)
     centre = estimate_rat_centre(cameras, mask_paths_ordered, log=log)
 
     pts, shape, origin = build_voxel_grid(
@@ -360,4 +425,9 @@ def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
         raise RuntimeError(f"Only {int(occupied.sum())} voxels remain after cleanup -- reconstruction failed")
 
     verts, faces = voxels_to_mesh(occupied, shape, origin, params["voxel_size"])
-    return verts, faces, centre
+
+    vertex_colors = None
+    if params.get("color_mesh", True):
+        vertex_colors = color_vertices(verts, cameras, colors, masks, log=log)
+
+    return verts, faces, centre, vertex_colors
