@@ -20,6 +20,9 @@ STATE = {
     "log": [],
     "results": [],       # [{frame_id, verts, faces, output_path}]
     "error": None,
+    "total_frames": 0,
+    "completed_frames": 0,
+    "current_frame": None,
 }
 
 
@@ -35,6 +38,9 @@ def run_pipeline(cfg):
         STATE["log"] = []
         STATE["results"] = []
         STATE["error"] = None
+        STATE["total_frames"] = 0
+        STATE["completed_frames"] = 0
+        STATE["current_frame"] = None
 
     try:
         cameras = recon.load_calibration(cfg["calibration_json"])
@@ -49,6 +55,8 @@ def run_pipeline(cfg):
 
         frames = recon.find_frames(cfg["masks_root"], object_id, mode, selection)
         log(f"resolved {len(frames)} frame(s) to reconstruct")
+        with STATE_LOCK:
+            STATE["total_frames"] = len(frames)
 
         params = {
             "voxel_size": float(cfg["voxel_size"]),
@@ -63,6 +71,8 @@ def run_pipeline(cfg):
 
         for frame_id, mask_paths in frames:
             log(f"--- {frame_id} ---")
+            with STATE_LOCK:
+                STATE["current_frame"] = frame_id
             try:
                 ordered = recon.match_masks_to_cameras(cameras, mask_paths)
                 verts, faces, centre = recon.reconstruct_frame(cameras, ordered, params, log=log)
@@ -79,9 +89,13 @@ def run_pipeline(cfg):
                 log(f"    FAILED: {fe}")
                 with STATE_LOCK:
                     STATE["results"].append({"frame_id": frame_id, "error": str(fe)})
+            finally:
+                with STATE_LOCK:
+                    STATE["completed_frames"] += 1
 
         with STATE_LOCK:
             STATE["status"] = "done"
+            STATE["current_frame"] = None
         log("=== DONE ===")
 
     except Exception as e:

@@ -12,6 +12,7 @@ already used everywhere in this codebase (just inverted).
 """
 
 import json
+import re
 from pathlib import Path
 
 import cv2
@@ -57,29 +58,48 @@ def load_calibration(json_path):
 
 def find_frames(masks_root, object_id, mode, selection):
     """
-    masks_root is expected to contain, per frame, a mask per camera. Two
+    masks_root is expected to contain, per frame, a mask per camera. Three
     layouts are supported (auto-detected):
       A) <masks_root>/rat_<object_id>/frame_XXXXXX/<camera_name>.png
       B) <masks_root>/frame_XXXXXX/cutouts/rat_<object_id>/<camera_name>.png
-    (matches the cutouts/rat_N/ convention already produced by the existing
-    rat_cutouts.py segmentation-stage tool)
+      C) <masks_root>/<camera_name>/cutouts/rat_<object_id>/frame_XXXXXX.png
+    (A and B match the cutouts/rat_N/ convention already produced by the
+    existing rat_cutouts.py segmentation-stage tool; C is the same tool run
+    with the camera folder as the outer level instead of the frame)
 
     Returns list of (frame_id, {camera_name: mask_path}).
     """
     root = Path(masks_root)
     rat_dir_a = root / f"rat_{object_id}"
 
-    def frame_ids_from(base_glob_dir, layout):
+    def frame_ids_from(base_glob_dir):
         ids = []
         for p in sorted(base_glob_dir.glob("frame_*")):
             if p.is_dir():
                 ids.append(p.name)
         return ids
 
+    # Layout B's outer dirs are frame_XXXXXX/cutouts/rat_<id>/ too, so
+    # exclude frame_*-named dirs here or every layout-B tree would also
+    # look like a (single-frame-named) layout-C camera directory.
+    cam_dirs_c = sorted(
+        p for p in root.glob("*")
+        if p.is_dir() and not p.name.startswith("frame_")
+        and (p / "cutouts" / f"rat_{object_id}").is_dir()
+    )
+
     if rat_dir_a.exists():
         layout = "A"
         base_dir = rat_dir_a
-        all_frame_ids = frame_ids_from(base_dir, layout)
+        all_frame_ids = frame_ids_from(base_dir)
+    elif cam_dirs_c:
+        layout = "C"
+        all_frame_ids = sorted({
+            p.stem
+            for cam_dir in cam_dirs_c
+            for p in (cam_dir / "cutouts" / f"rat_{object_id}").iterdir()
+            if p.suffix.lower() in IMAGE_EXTENSIONS and p.stem.startswith("frame_")
+        })
     else:
         layout = "B"
         base_dir = root
@@ -88,8 +108,9 @@ def find_frames(masks_root, object_id, mode, selection):
 
     if not all_frame_ids:
         raise FileNotFoundError(
-            f"No frames found for object {object_id} under {masks_root} "
-            f"(expected rat_{object_id}/frame_XXXXXX/ or frame_XXXXXX/cutouts/rat_{object_id}/)"
+            f"No frames found for object {object_id} under {masks_root} (expected "
+            f"rat_{object_id}/frame_XXXXXX/, frame_XXXXXX/cutouts/rat_{object_id}/, "
+            f"or <camera>/cutouts/rat_{object_id}/frame_XXXXXX.png)"
         )
 
     if mode == "single":
@@ -112,14 +133,20 @@ def find_frames(masks_root, object_id, mode, selection):
 
     result = []
     for fid in chosen:
-        if layout == "A":
-            frame_dir = base_dir / fid
-        else:
-            frame_dir = base_dir / fid / "cutouts" / f"rat_{object_id}"
         mask_paths = {}
-        for p in frame_dir.iterdir():
-            if p.suffix.lower() in IMAGE_EXTENSIONS:
-                mask_paths[p.stem] = p
+        if layout == "C":
+            for cam_dir in cam_dirs_c:
+                cam_frame_dir = cam_dir / "cutouts" / f"rat_{object_id}"
+                for ext in IMAGE_EXTENSIONS:
+                    fpath = cam_frame_dir / f"{fid}{ext}"
+                    if fpath.exists():
+                        mask_paths[cam_dir.name] = fpath
+                        break
+        else:
+            frame_dir = base_dir / fid if layout == "A" else base_dir / fid / "cutouts" / f"rat_{object_id}"
+            for p in frame_dir.iterdir():
+                if p.suffix.lower() in IMAGE_EXTENSIONS:
+                    mask_paths[p.stem] = p
         if not mask_paths:
             continue
         result.append((fid, mask_paths))
@@ -129,16 +156,38 @@ def find_frames(masks_root, object_id, mode, selection):
     return result
 
 
+def _trailing_number(s):
+    m = re.search(r"(\d+)$", s)
+    return int(m.group(1)) if m else None
+
+
 def match_masks_to_cameras(cameras, mask_paths):
     """Order mask_paths (dict of arbitrary-key -> path) to match the
-    cameras list order, matching by camera name substring."""
+    cameras list order. Matches by camera name substring first (e.g.
+    calibration name "camera_001" vs mask key "camera_001"), falling back
+    to matching by trailing camera index (e.g. calibration name
+    "camera_001" vs a mask folder named "cam_1")."""
     ordered = []
+    used_keys = set()
     for cam in cameras:
         found = None
         for key, path in mask_paths.items():
+            if key in used_keys:
+                continue
             if cam["name"] in key or key in cam["name"]:
                 found = path
+                used_keys.add(key)
                 break
+        if found is None:
+            cam_num = _trailing_number(cam["name"])
+            if cam_num is not None:
+                for key, path in mask_paths.items():
+                    if key in used_keys:
+                        continue
+                    if _trailing_number(key) == cam_num:
+                        found = path
+                        used_keys.add(key)
+                        break
         ordered.append(found)
     return ordered
 

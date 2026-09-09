@@ -40,6 +40,11 @@
   .status-running { color: #f4a261; border-color: #f4a261; }
   .status-done { color: #7fd79a; border-color: #7fd79a; }
   .status-error { color: #e88; border-color: #e88; }
+  #progressWrap { display: none; margin-bottom: 12px; }
+  #progressMeta { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  #progressTrack { height: 8px; border-radius: 5px; background: #100f0b; border: 1px solid var(--border); overflow: hidden; }
+  #progressBar { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s ease; }
+  #progressTrack.error #progressBar { background: #e88; }
   table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   th { color: var(--text-dim); font-weight: 500; }
@@ -66,7 +71,7 @@
       <label>output folder</label>
       <input type="text" id="outputRoot">
     </div>
-    <div class="hint">expects rat_&lt;object_id&gt;/frame_XXXXXX/&lt;camera_name&gt;.png (or frame_XXXXXX/cutouts/rat_&lt;object_id&gt;/&lt;camera_name&gt;.png) under the masks root -- the existing segmentation tool's output convention.</div>
+    <div class="hint">expects one of: rat_&lt;object_id&gt;/frame_XXXXXX/&lt;camera_name&gt;.png, or frame_XXXXXX/cutouts/rat_&lt;object_id&gt;/&lt;camera_name&gt;.png, or &lt;camera_name&gt;/cutouts/rat_&lt;object_id&gt;/frame_XXXXXX.png -- under the masks root, auto-detected.</div>
   </div>
 
   <div class="card">
@@ -102,6 +107,13 @@
     <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
       <button id="runBtn">Run reconstruction</button>
       <span class="status-badge status-idle" id="statusBadge">idle</span>
+    </div>
+    <div id="progressWrap">
+      <div id="progressMeta">
+        <span id="progressLabel">0 / 0 frames</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div id="progressTrack"><div id="progressBar"></div></div>
     </div>
     <div id="log"></div>
   </div>
@@ -184,6 +196,9 @@ async function run() {
   if (!res.ok) { const err = await res.json(); alert(`Could not start: ${err.error}`); return; }
   document.getElementById('runBtn').disabled = true;
   document.getElementById('resultsCard').style.display = 'none';
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('progressTrack').classList.remove('error');
   if (polling) clearInterval(polling);
   polling = setInterval(poll, 800);
 }
@@ -195,6 +210,23 @@ async function poll() {
   badge.className = `status-badge status-${state.status}`;
   document.getElementById('log').textContent = state.log.join('\n');
   document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+
+  const progressWrap = document.getElementById('progressWrap');
+  const total = state.total_frames || 0;
+  if (total > 0 && (state.status === 'running' || state.status === 'done' || state.status === 'error')) {
+    const done = state.completed_frames || 0;
+    const pct = Math.round((done / total) * 100);
+    progressWrap.style.display = 'block';
+    document.getElementById('progressBar').style.width = `${pct}%`;
+    document.getElementById('progressPct').textContent = `${pct}%`;
+    const label = state.current_frame && state.status === 'running'
+      ? `${done} / ${total} frames — ${state.current_frame}`
+      : `${done} / ${total} frames`;
+    document.getElementById('progressLabel').textContent = label;
+    document.getElementById('progressTrack').classList.toggle('error', state.status === 'error');
+  } else {
+    progressWrap.style.display = 'none';
+  }
 
   const body = document.getElementById('resultsBody');
   body.innerHTML = '';

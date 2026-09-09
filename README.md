@@ -193,10 +193,11 @@ Reconstructs a watertight 3D mesh of the animal for each frame from its
 silhouette in all 6 views — a classic **shape-from-silhouette / visual
 hull** approach.
 
-1. Provide per-camera segmentation masks under `data/masks/`, in either
-   layout (auto-detected):
+1. Provide per-camera segmentation masks under `data/masks/`, in any of
+   three layouts (auto-detected):
    - `masks/rat_<id>/frame_XXXXXX/<camera_name>.png`
    - `masks/frame_XXXXXX/cutouts/rat_<id>/<camera_name>.png`
+   - `masks/<camera_name>/cutouts/rat_<id>/frame_XXXXXX.png`
 2. Start the server, open **http://127.0.0.1:8972**, point it at your rig
    JSON from Stage 1 and your masks folder, choose a single frame or a
    range, and run.

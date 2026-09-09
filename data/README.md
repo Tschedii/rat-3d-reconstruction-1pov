@@ -13,8 +13,9 @@ data/
 │   ├── checkerboard_frames/  → intermediate: extracted checkerboard frames (auto-generated)
 │   └── output/                → output: <name>.json (camera rig) + rig_perspective.png + rig_top_view.png
 ├── masks/                     → input:  Step 2 (from your segmentation tool of choice)
-│   ├── rat_1/frame_000000/camera_001.png …          (layout A)
-│   └── rat_2/frame_000000/cutouts/rat_2/camera_001.png   (layout B, alternative)
+│   ├── rat_1/frame_000000/camera_001.png …                (layout A)
+│   ├── frame_000000/cutouts/rat_2/camera_001.png …        (layout B, alternative)
+│   └── camera_001/cutouts/rat_1/frame_000000.png …        (layout C, alternative)
 ├── meshes/
 │   ├── rat/                   ⇄ Step 2 output → Step 4 input
 │   │   └── object_<id>/frame_000000/mesh.obj
@@ -38,10 +39,18 @@ other GUI depends on.
 
 ## Segmentation masks — `masks/`
 Per-frame, per-camera silhouette masks for each tracked animal, produced by
-your segmentation step (e.g. SAM). **GUI 2** auto-detects either layout:
+your segmentation step (e.g. SAM). **GUI 2** auto-detects any of three
+layouts:
 
 - **A** — `masks/rat_<id>/frame_XXXXXX/<camera_name>.png`
 - **B** — `masks/frame_XXXXXX/cutouts/rat_<id>/<camera_name>.png`
+- **C** — `masks/<camera_name>/cutouts/rat_<id>/frame_XXXXXX.png`
+  (camera folder outer, frame as the filename — e.g. `cam_1`, `cam_2`, …)
+
+For layout C, camera folder names don't need to match the calibration
+JSON's camera names exactly — `cam_1` matches a calibration camera named
+`camera_001` by trailing index number if an exact/substring match isn't
+found.
 
 ## Meshes — `meshes/`
 - `rat/object_<id>/frame_XXXXXX/mesh.obj` — visual-hull mesh written by
