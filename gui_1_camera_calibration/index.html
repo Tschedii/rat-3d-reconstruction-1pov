@@ -152,6 +152,14 @@ function collectConfig() {
   PARAM_FIELDS.forEach(([key]) => {
     cfg[key] = parseFloat(document.getElementById(`p_${key}`).value);
   });
+  if (!(cfg.square_size > 0)) {
+    alert('square size (m) must be a positive number -- a zero or blank value makes every checkerboard corner collapse onto the same point and calibration cannot solve for anything.');
+    return null;
+  }
+  if (!(cfg.board_w >= 2) || !(cfg.board_h >= 2)) {
+    alert('board width/height must each be at least 2 (count inner corners, not squares).');
+    return null;
+  }
   return cfg;
 }
 

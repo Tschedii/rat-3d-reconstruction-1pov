@@ -53,6 +53,17 @@ def run_pipeline(cfg):
         board_w = int(cfg["board_w"])
         board_h = int(cfg["board_h"])
         square_size = float(cfg["square_size"])
+        if board_w < 2 or board_h < 2:
+            raise ValueError(
+                f"board_w/board_h must each be >= 2 (count INNER corners, not squares) -- got {board_w}x{board_h}"
+            )
+        if not (square_size > 0):
+            raise ValueError(
+                f"square_size must be a positive number in meters -- got {square_size!r}. A zero or blank "
+                f"value collapses every checkerboard corner onto the same 3D point, which is what causes "
+                f"OpenCV's cryptic 'initIntrinsicParams2D: matH0.size() == Size(3, 3)' assertion failure "
+                f"deep inside calibrateCamera."
+            )
         sensor_specs = {
             "focal_length_mm": cfg.get("focal_length_mm"),
             "sensor_width_mm": cfg.get("sensor_width_mm"),
