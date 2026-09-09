@@ -213,7 +213,7 @@ def _detect_corners(image_paths, board_w, board_h, log=print):
         if not found:
             continue
         corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-        obj_points.append(objp)
+        obj_points.append(objp.copy())
         img_points.append(corners_refined)
         used_files.append(path.name)
 
