@@ -7,7 +7,9 @@ calibration -> extrinsic calibration -> rig visualization) in a background
 thread so the frontend can poll progress without blocking.
 """
 
+import concurrent.futures
 import json
+import os
 import threading
 import traceback
 from datetime import datetime, date
@@ -75,8 +77,8 @@ def run_pipeline(cfg):
         video_paths = {c["name"]: c["video_path"] for c in cameras_cfg}
 
         log("=== STAGE 1: extracting diverse frames per camera (intrinsics) ===")
-        intrinsics_by_cam = {}
-        for c in cameras_cfg:
+
+        def calibrate_one_camera(c):
             name = c["name"]
             log(f"[{name}] extracting diverse frames from {c['video_path']}")
             frame_dir = WORK_DIR / "internal_parameter" / name
@@ -89,13 +91,39 @@ def run_pipeline(cfg):
                 log=log,
             )
             log(f"[{name}] calibrating intrinsics")
-            intr = cal.calibrate_intrinsics(
+            return name, cal.calibrate_intrinsics(
                 frame_dir, board_w, board_h, square_size,
                 sensor_specs=sensor_specs,
                 outlier_threshold_px=float(cfg.get("outlier_threshold_px", 0.8)),
                 log=log,
             )
-            intrinsics_by_cam[name] = intr
+
+        # Each camera's extraction + intrinsic calibration is fully
+        # independent (own video, own output folder) -- running them
+        # sequentially wastes 5/6 of the machine's cores for the slowest
+        # part of the whole pipeline, so fan them out instead.
+        max_workers = min(len(cameras_cfg), os.cpu_count() or len(cameras_cfg))
+        log(f"  running {len(cameras_cfg)} camera(s) in parallel (up to {max_workers} at once) -- "
+            f"log lines below will interleave across cameras")
+
+        intrinsics_by_cam = {}
+        failures = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_name = {executor.submit(calibrate_one_camera, c): c["name"] for c in cameras_cfg}
+            for future in concurrent.futures.as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    _, intr = future.result()
+                    intrinsics_by_cam[name] = intr
+                except Exception as e:
+                    failures[name] = e
+                    log(f"[{name}] FAILED: {e}")
+                    for pending in future_to_name:
+                        pending.cancel()  # no-op for already-running work, skips any not yet started
+
+        if failures:
+            names = ", ".join(sorted(failures))
+            raise RuntimeError(f"intrinsic calibration failed for camera(s): {names} -- see log above for details")
 
         log("=== STAGE 2: extracting synchronized frames (extrinsics) ===")
         synced_dir = WORK_DIR / "external_parameter"
