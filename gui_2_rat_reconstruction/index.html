@@ -101,13 +101,22 @@
   <div class="card">
     <div class="section-label">Reconstruction parameters</div>
     <div class="params-grid" id="paramsGrid"></div>
-    <div class="field" style="margin-top:12px;">
-      <label style="display:flex; align-items:center; gap:7px; flex-direction:row;">
-        <input type="checkbox" id="colorMesh" checked style="width:auto;">
-        colour mesh from cutouts (fur colour)
-      </label>
-      <div class="hint">samples each vertex's RGB from whichever camera cutouts see it as foreground and writes it into the .obj as a "v x y z r g b" vertex colour -- adds a bit of runtime per frame.</div>
+    <div class="field" style="margin-top:12px; max-width:320px;">
+      <label>surface smoothing (Taubin iterations)</label>
+      <input type="number" step="1" min="0" id="p_smooth_iterations">
+      <div class="hint">removes the blocky marching-cubes "staircase" look without shrinking the mesh; 0 disables smoothing.</div>
     </div>
+    <div class="section-label" style="margin-top:16px;">Texture</div>
+    <div class="radio-group">
+      <label><input type="radio" name="textureMode" value="atlas" checked> baked texture atlas</label>
+      <label><input type="radio" name="textureMode" value="vertex_color"> per-vertex colour</label>
+      <label><input type="radio" name="textureMode" value="none"> none (geometry only)</label>
+    </div>
+    <div id="atlasSizeField" class="field" style="max-width:200px;">
+      <label>atlas resolution (px)</label>
+      <input type="number" step="128" id="p_atlas_size">
+    </div>
+    <div class="hint">"baked texture atlas" warps each face's best-camera view into a real image texture (.obj+.mtl+.png) -- sharper than per-vertex colour and, unlike its non-standard "v x y z r g b" extension, renders correctly in ordinary viewers (macOS Preview included). "per-vertex colour" is faster but blurrier and needs a viewer that supports that extension (MeshLab, CloudCompare, Blender, Open3D).</div>
   </div>
 
   <div class="card">
@@ -149,7 +158,9 @@ const PARAM_FIELDS = [
 async function init() {
   defaults = await (await fetch(`${API}/api/defaults`)).json();
   document.getElementById('outputRoot').value = defaults.output_root;
-  document.getElementById('colorMesh').checked = defaults.color_mesh !== false;
+  document.getElementById('p_smooth_iterations').value = defaults.smooth_iterations;
+  document.getElementById('p_atlas_size').value = defaults.atlas_size;
+  document.querySelector(`input[name=textureMode][value="${defaults.texture_mode}"]`).checked = true;
 
   const grid = document.getElementById('paramsGrid');
   PARAM_FIELDS.forEach(([key, label]) => {
@@ -160,6 +171,13 @@ async function init() {
   });
 
   document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', updateModeFields));
+  document.querySelectorAll('input[name=textureMode]').forEach(r => r.addEventListener('change', updateTextureModeFields));
+  updateTextureModeFields();
+}
+
+function updateTextureModeFields() {
+  const mode = document.querySelector('input[name=textureMode]:checked').value;
+  document.getElementById('atlasSizeField').style.display = mode === 'atlas' ? 'flex' : 'none';
 }
 
 function updateModeFields() {
@@ -190,7 +208,9 @@ function collectConfig() {
     cfg.step = parseInt(document.getElementById('seqStep').value) || 1;
   }
   PARAM_FIELDS.forEach(([key]) => { cfg[key] = parseFloat(document.getElementById(`p_${key}`).value); });
-  cfg.color_mesh = document.getElementById('colorMesh').checked;
+  cfg.smooth_iterations = parseInt(document.getElementById('p_smooth_iterations').value) || 0;
+  cfg.texture_mode = document.querySelector('input[name=textureMode]:checked').value;
+  cfg.atlas_size = parseInt(document.getElementById('p_atlas_size').value) || 1536;
   return cfg;
 }
 

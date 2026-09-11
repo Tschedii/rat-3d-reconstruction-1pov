@@ -22,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from skimage import measure
-from scipy import ndimage
+from scipy import ndimage, sparse
 
 IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp"]
 
@@ -383,6 +383,43 @@ def voxels_to_mesh(occupied, shape, origin, voxel_size):
     return verts_world, faces
 
 
+def _vertex_adjacency_matrix(n_verts, faces):
+    """Symmetric 0/1 sparse adjacency matrix from triangle edges."""
+    edges = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
+    edges = np.concatenate([edges, edges[:, ::-1]], axis=0)
+    data = np.ones(len(edges), dtype=np.float64)
+    A = sparse.coo_matrix((data, (edges[:, 0], edges[:, 1])), shape=(n_verts, n_verts)).tocsr()
+    A.data[:] = 1.0  # collapse any duplicate edges back to a plain 0/1 adjacency
+    return A
+
+
+def taubin_smooth(verts, faces, iterations=10, lambda_=0.5, mu=-0.53):
+    """Taubin (1995) lambda/mu mesh smoothing.
+
+    Plain (Laplacian-only) smoothing removes the staircase artefacts of
+    marching cubes but visibly shrinks the mesh over successive iterations,
+    since every step moves each vertex toward the centroid of its
+    neighbours. Taubin smoothing alternates that shrinking step (factor
+    lambda_ > 0) with a second, oppositely-signed "inflating" step (factor
+    mu < 0, |mu| > lambda_) that undoes the shrinkage's low-frequency
+    component while leaving the high-frequency (staircase) noise removed --
+    a low-pass filter on the mesh surface rather than a pure contraction.
+    """
+    n = len(verts)
+    A = _vertex_adjacency_matrix(n, faces)
+    degree = np.asarray(A.sum(axis=1)).flatten()
+    isolated = degree == 0
+    degree[isolated] = 1.0  # guard only; a valid marching-cubes mesh has no isolated vertices
+    inv_degree = (1.0 / degree)[:, None]
+
+    v = verts.astype(np.float64).copy()
+    for _ in range(iterations):
+        for factor in (lambda_, mu):
+            neighbour_mean = A @ v * inv_degree
+            v = v + factor * (neighbour_mean - v)
+    return v
+
+
 def save_obj(path, verts, faces, colors=None):
     """colors, if given, is an (N, 3) uint8 RGB array -- written as the
     widely-supported (MeshLab / CloudCompare / Open3D / Blender) "v x y z
@@ -399,6 +436,190 @@ def save_obj(path, verts, faces, colors=None):
                 f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
         for face in faces:
             f.write(f"f {face[0]+1}//{face[0]+1} {face[1]+1}//{face[1]+1} {face[2]+1}//{face[2]+1}\n")
+
+
+# =============================================================================
+# Texture-atlas baking -- a real image texture sampled from the source
+# camera footage, rather than the flat "v x y z r g b" per-vertex colour of
+# color_vertices()/save_obj(). Per-vertex colour is bounded by mesh vertex
+# spacing no matter how sharp the source images are, and (being a
+# non-standard OBJ extension) isn't rendered at all by many simple viewers,
+# including macOS Preview/Quick Look. An image texture referenced through a
+# standard .mtl file has neither limitation.
+# =============================================================================
+
+def unwrap_cylindrical(verts, faces):
+    """Per-face-corner cylindrical UV unwrap. Finds the mesh's principal
+    axis via PCA (a reasonable proxy for the animal's nose-to-tail axis for
+    a visual-hull body) and parameterises each vertex by its angle around
+    that axis (u) and position along it (v). UV is computed per FACE CORNER
+    rather than per vertex specifically to handle the seam where the angle
+    wraps from 1 back to 0: a face straddling the seam gets its low-u
+    corner(s) shifted up by +1 for that face only, so its UV footprint is
+    contiguous instead of spanning almost the whole atlas width -- the same
+    vertex can therefore carry different UV coordinates in different faces,
+    which is exactly what independent v/vt face-corner indices in the OBJ
+    format are for.
+
+    Returns (corner_uv, axis): corner_uv has shape (F, 3, 2), values in
+    [0, ~2) for u (wrap with `% 1.0` when addressing actual texture pixels)
+    and [0, 1] for v.
+    """
+    centre = verts.mean(axis=0)
+    centered = verts - centre
+    cov = centered.T @ centered
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    axis = eigvecs[:, np.argmax(eigvals)]
+
+    world_ref = np.array([0.0, 0.0, 1.0])
+    if abs(np.dot(axis, world_ref)) > 0.95:
+        world_ref = np.array([0.0, 1.0, 0.0])
+    e1 = np.cross(axis, world_ref)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(axis, e1)
+
+    along = centered @ axis
+    x1 = centered @ e1
+    x2 = centered @ e2
+    angle = np.arctan2(x2, x1)
+
+    u_vertex = (angle + np.pi) / (2.0 * np.pi)
+    span = along.max() - along.min()
+    v_vertex = (along - along.min()) / (span if span > 1e-9 else 1.0)
+
+    corner_uv = np.empty((len(faces), 3, 2), dtype=np.float64)
+    us = u_vertex[faces]  # (F, 3)
+    seam = (us.max(axis=1) - us.min(axis=1)) > 0.5
+    us_fixed = np.where(seam[:, None] & (us < 0.5), us + 1.0, us)
+    corner_uv[:, :, 0] = us_fixed
+    corner_uv[:, :, 1] = v_vertex[faces]
+    return corner_uv, axis
+
+
+def bake_texture_atlas(verts, faces, corner_uv, cameras, colors, masks, atlas_size=1536, log=print):
+    """Bake a texture atlas: for each face, pick whichever camera views it
+    the most frontally (highest alignment between the face normal and the
+    direction to that camera) among cameras where all three of its vertices
+    are foreground, then warp that camera's corresponding image triangle
+    into the face's UV footprint via an affine transform -- the standard
+    per-triangle projective-texturing approach, with view (not multi-band)
+    selection: no blending is performed across the boundary between two
+    faces textured from different cameras, so a faint seam can appear
+    there. Faces with no fully-visible camera fall back to a flat fill
+    from color_vertices()'s per-vertex average.
+
+    Returns an (atlas_size, atlas_size, 3) uint8 RGB image.
+    """
+    n_verts = len(verts)
+    n_cams = len(cameras)
+
+    proj_px = np.zeros((n_cams, n_verts, 2))
+    vis = np.zeros((n_cams, n_verts), dtype=bool)
+    for ci, cam in enumerate(cameras):
+        if colors[ci] is None or masks[ci] is None:
+            continue
+        px, in_front = project_points(verts, cam["R"], cam["t"], cam["K"], cam["dist"])
+        h, w = masks[ci].shape
+        u_px = np.round(px[:, 0]).astype(np.int32)
+        v_px = np.round(px[:, 1]).astype(np.int32)
+        inside = in_front & (u_px >= 0) & (u_px < w) & (v_px >= 0) & (v_px < h)
+        ok = np.zeros(n_verts, dtype=bool)
+        ok[inside] = masks[ci][v_px[inside], u_px[inside]] > 0
+        proj_px[ci] = px
+        vis[ci] = ok
+
+    tri_v = verts[faces]  # (F, 3, 3)
+    normals = np.cross(tri_v[:, 1] - tri_v[:, 0], tri_v[:, 2] - tri_v[:, 0])
+    norm_len = np.linalg.norm(normals, axis=1, keepdims=True)
+    norm_len[norm_len == 0] = 1.0
+    normals = normals / norm_len
+    centroids = tri_v.mean(axis=1)
+    cam_pos_arr = np.array([cam["cam_pos"] for cam in cameras], dtype=np.float64)
+
+    fallback_colors = color_vertices(verts, cameras, colors, masks, log=lambda *_: None)
+
+    atlas = np.zeros((atlas_size, atlas_size, 3), dtype=np.uint8)
+    painted = np.zeros((atlas_size, atlas_size), dtype=bool)
+    n_baked, n_fallback = 0, 0
+
+    for fi, face in enumerate(faces):
+        face_vis = vis[:, face].all(axis=1)  # (C,) -- True where all 3 verts are foreground
+        cam_candidates = np.nonzero(face_vis)[0]
+
+        # Wrap the whole face into [0, 1) with a SINGLE shared offset -- not
+        # each corner's own `% 1.0` -- so a face straddling the seam (whose
+        # corner_uv values from unwrap_cylindrical span e.g. [0.98, 1.02])
+        # keeps its three corners together instead of being torn back apart
+        # across the cut, which would otherwise paint a huge, wrong-content
+        # triangle over unrelated parts of the atlas.
+        u_corners = corner_uv[fi, :, 0] - np.floor(corner_uv[fi, :, 0].min())
+        dst = np.stack([u_corners * atlas_size,
+                         (1.0 - corner_uv[fi, :, 1]) * atlas_size], axis=1).astype(np.float32)
+        x0, y0 = np.floor(dst.min(axis=0)).astype(int)
+        x1, y1 = np.ceil(dst.max(axis=0)).astype(int) + 1
+        x0, y0 = max(x0, 0), max(y0, 0)
+        x1, y1 = min(x1, atlas_size), min(y1, atlas_size)
+        if x1 <= x0 or y1 <= y0:
+            continue  # degenerate UV triangle (zero footprint in the atlas): nothing to paint
+
+        dst_local = dst - [x0, y0]
+        mask_local = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+        cv2.fillConvexPoly(mask_local, dst_local.astype(np.int32), 255)
+        region = mask_local > 0
+        if not region.any():
+            continue
+
+        if len(cam_candidates) > 0:
+            view_dirs = cam_pos_arr[cam_candidates] - centroids[fi]
+            view_dirs /= np.linalg.norm(view_dirs, axis=1, keepdims=True)
+            best_ci = cam_candidates[np.argmax(view_dirs @ normals[fi])]
+            src_tri = proj_px[best_ci, face].astype(np.float32)
+            M = cv2.getAffineTransform(src_tri, dst_local.astype(np.float32))
+            warped_bgr = cv2.warpAffine(
+                colors[best_ci], M, (x1 - x0, y1 - y0),
+                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+            )
+            atlas[y0:y1, x0:x1][region] = warped_bgr[region][:, ::-1]  # BGR -> RGB
+            n_baked += 1
+        else:
+            flat_rgb = fallback_colors[face].mean(axis=0).astype(np.uint8)
+            atlas[y0:y1, x0:x1][region] = flat_rgb
+            n_fallback += 1
+        painted[y0:y1, x0:x1] |= region
+
+    log(f"    texture atlas: {n_baked:,} faces baked from camera views, {n_fallback:,} used a flat fallback fill")
+
+    unpainted = (~painted).astype(np.uint8) * 255
+    if unpainted.any() and painted.any():
+        atlas = cv2.inpaint(atlas, unpainted, 3, cv2.INPAINT_TELEA)
+    return atlas
+
+
+def save_textured_obj(path, verts, faces, corner_uv, atlas_rgb):
+    """Write an OBJ + MTL + PNG texture triple: a standard image-textured
+    mesh, viewable (unlike the "v x y z r g b" extension of save_obj) in
+    essentially any OBJ-capable tool, including macOS Preview/Quick Look."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mtl_path = path.with_suffix(".mtl")
+    tex_path = path.with_name(path.stem + "_texture.png")
+
+    cv2.imwrite(str(tex_path), atlas_rgb[:, :, ::-1])  # RGB -> BGR for cv2.imwrite
+
+    with open(mtl_path, "w") as f:
+        f.write(f"newmtl material0\nKd 1.0 1.0 1.0\nmap_Kd {tex_path.name}\n")
+
+    with open(path, "w") as f:
+        f.write("# Visual hull reconstruction (textured)\n")
+        f.write(f"mtllib {mtl_path.name}\n")
+        f.write("usemtl material0\n")
+        for v in verts:
+            f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
+        for uv_tri in corner_uv.reshape(-1, 2):
+            f.write(f"vt {uv_tri[0] % 1.0:.6f} {uv_tri[1]:.6f}\n")
+        for fi, face in enumerate(faces):
+            vt0, vt1, vt2 = 3 * fi + 1, 3 * fi + 2, 3 * fi + 3
+            f.write(f"f {face[0]+1}/{vt0} {face[1]+1}/{vt1} {face[2]+1}/{vt2}\n")
 
 
 # =============================================================================
@@ -425,9 +646,25 @@ def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
         raise RuntimeError(f"Only {int(occupied.sum())} voxels remain after cleanup -- reconstruction failed")
 
     verts, faces = voxels_to_mesh(occupied, shape, origin, params["voxel_size"])
+    log(f"    raw mesh: {len(verts):,} verts, {len(faces):,} faces")
 
-    vertex_colors = None
-    if params.get("color_mesh", True):
-        vertex_colors = color_vertices(verts, cameras, colors, masks, log=log)
+    smooth_iterations = int(params.get("smooth_iterations", 10))
+    if smooth_iterations > 0:
+        verts = taubin_smooth(verts, faces, iterations=smooth_iterations)
+        log(f"    smoothed surface ({smooth_iterations} Taubin iterations)")
 
-    return verts, faces, centre, vertex_colors
+    texture_mode = params.get("texture_mode", "atlas")  # "atlas" | "vertex_color" | "none"
+    result = {"verts": verts, "faces": faces, "centre": centre,
+              "vertex_colors": None, "corner_uv": None, "atlas": None}
+
+    if texture_mode == "atlas":
+        corner_uv, _ = unwrap_cylindrical(verts, faces)
+        atlas_size = int(params.get("atlas_size", 1536))
+        atlas = bake_texture_atlas(verts, faces, corner_uv, cameras, colors, masks,
+                                    atlas_size=atlas_size, log=log)
+        result["corner_uv"] = corner_uv
+        result["atlas"] = atlas
+    elif texture_mode == "vertex_color":
+        result["vertex_colors"] = color_vertices(verts, cameras, colors, masks, log=log)
+
+    return result

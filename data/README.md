@@ -53,12 +53,14 @@ JSON's camera names exactly — `cam_1` matches a calibration camera named
 found.
 
 ## Meshes — `meshes/`
-- `rat/object_<id>/frame_XXXXXX/mesh.obj` — visual-hull mesh written by
-  **GUI 2**, coloured with real fur colour per vertex (sampled from the
-  same cutouts used for carving) unless "colour mesh" is unchecked. For
-  **GUI 4** (eye marking), point it at a per-frame preview named
-  `mesh_preview.ply` (a lightweight/decimated version of the same mesh
-  works well for smooth interactive marking).
+- `rat/object_<id>/frame_XXXXXX/mesh.obj` — smoothed visual-hull mesh
+  written by **GUI 2**, textured with real fur colour sampled from the
+  same cutouts used for carving. Default `texture_mode` (`atlas`) also
+  writes a `mesh.mtl` + `mesh_texture.png` alongside it — a real baked
+  texture image, viewable in any OBJ-capable tool. For **GUI 4** (eye
+  marking), point it at a per-frame preview named `mesh_preview.ply` (a
+  lightweight/decimated version of the same mesh works well for smooth
+  interactive marking).
 - `environment/` — your static scene mesh (arena, box, table — `.obj` /
   `.mtl` / textures), placed manually. Loaded by **GUI 3**.
 

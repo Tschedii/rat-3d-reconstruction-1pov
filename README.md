@@ -205,14 +205,26 @@ hull** approach.
    from the masks (no manual seed point needed), a voxel grid around it is
    carved down using all camera silhouettes (`min_cameras` agreement
    required to keep a voxel), the largest connected component is kept, and
-   **marching cubes** extracts the final surface. With "colour mesh"
-   checked (the default), each vertex is then reprojected into every
-   camera and coloured from whichever cutouts see it as fur — the masks
-   double as the colour source, so no separate video access is needed.
-4. Result: `data/meshes/rat/object_<id>/frame_XXXXXX/mesh.obj`, with real
-   fur colour baked into the mesh as a "v x y z r g b" vertex-colour
-   extension (read natively by MeshLab, CloudCompare, Open3D and Blender's
-   OBJ importer).
+   **marching cubes** extracts the final surface. The raw marching-cubes
+   surface is then smoothed (Taubin smoothing — removes the blocky voxel
+   "staircase" look without shrinking the mesh, unlike plain Laplacian
+   smoothing) before texturing.
+4. Texturing (`texture_mode`, chosen in the UI):
+   - **`atlas`** (default) — the mesh is cylindrically UV-unwrapped and a
+     real texture image is baked by warping each face's best-camera view
+     into its UV footprint (a per-triangle affine warp, chosen by which
+     camera views that face most frontally). Written as a standard
+     `mesh.obj` + `mesh.mtl` + `mesh_texture.png` — sharper than per-vertex
+     colour (not bounded by mesh vertex spacing) and viewable in any
+     OBJ-capable tool, macOS Preview/Quick Look included.
+   - **`vertex_color`** — each vertex is reprojected into every camera and
+     coloured from whichever cutouts see it as fur, written as a
+     non-standard `v x y z r g b` OBJ extension (read by MeshLab,
+     CloudCompare, Open3D, and Blender's OBJ importer — but *not* by
+     simpler viewers, which will show untextured geometry instead).
+   - **`none`** — geometry only.
+5. Result: `data/meshes/rat/object_<id>/frame_XXXXXX/mesh.obj` (+ `.mtl` and
+   `_texture.png` in `atlas` mode).
 
 ## Stage 3 — Scene placement
 
