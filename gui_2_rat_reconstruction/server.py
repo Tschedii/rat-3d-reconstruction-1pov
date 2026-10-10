@@ -64,13 +64,58 @@ def run_pipeline(cfg):
             "half_xy": float(cfg["half_xy"]),
             "depth_below": float(cfg["depth_below"]),
             "depth_above": float(cfg["depth_above"]),
+            "head_min_cameras": int(cfg["head_min_cameras"]) if cfg.get("head_min_cameras") not in (None, "") else None,
+            "head_zone_frac": float(cfg.get("head_zone_frac") or 0),
             "smooth_iterations": int(cfg.get("smooth_iterations", 10)),
             "texture_mode": cfg.get("texture_mode", "atlas"),
             "atlas_size": int(cfg.get("atlas_size", 1536)),
+            "completion_mode": cfg.get("completion_mode") or "none",
+            "template_path": (cfg.get("template_path") or "").strip() or None,
+            "fit_iterations": int(cfg.get("fit_iterations") or 600),
+            "fit_nodes": int(cfg.get("fit_nodes") or 200),
+            "fit_sil_cameras": int(cfg["fit_sil_cameras"]) if cfg.get("fit_sil_cameras") not in (None, "") else None,
         }
+        if params["completion_mode"] not in ("none", "template"):
+            raise ValueError(f"completion_mode must be 'none' or 'template' (got {params['completion_mode']!r})")
+        if params["completion_mode"] == "template":
+            if params["template_path"] and not Path(params["template_path"]).is_file():
+                raise ValueError(f"template mesh not found: {params['template_path']}")
+            if params["fit_iterations"] < 1:
+                raise ValueError(f"fit_iterations must be >= 1 (got {params['fit_iterations']})")
+            if params["fit_nodes"] < 2:
+                raise ValueError(f"fit_nodes must be >= 2 (got {params['fit_nodes']})")
+            if params["fit_sil_cameras"] is not None and params["fit_sil_cameras"] < 1:
+                raise ValueError(f"fit_sil_cameras must be >= 1 (got {params['fit_sil_cameras']})")
+            try:
+                import torch  # noqa: F401
+            except ImportError:
+                raise ValueError("template completion needs PyTorch in this environment: pip install torch")
+        if params["voxel_size"] <= 0:
+            raise ValueError(f"voxel_size must be > 0 (got {params['voxel_size']})")
+        if params["half_xy"] <= 0:
+            raise ValueError(f"half_xy must be > 0 (got {params['half_xy']})")
+        if params["depth_below"] + params["depth_above"] <= 0:
+            raise ValueError(
+                "depth_below + depth_above must be > 0 (got depth_below="
+                f"{params['depth_below']}, depth_above={params['depth_above']})"
+            )
+        if params["min_cameras"] < 1:
+            raise ValueError(f"min_cameras must be >= 1 (got {params['min_cameras']})")
+        if not (0 <= params["head_zone_frac"] <= 1):
+            raise ValueError(f"head_zone_frac must be between 0 and 1 (got {params['head_zone_frac']})")
+        if params["head_min_cameras"] is not None:
+            if params["head_min_cameras"] < 1:
+                raise ValueError(f"head_min_cameras must be >= 1 (got {params['head_min_cameras']})")
+            if params["head_min_cameras"] > params["min_cameras"]:
+                raise ValueError(
+                    "head_min_cameras should be <= min_cameras (it's meant to relax the threshold "
+                    f"for the head zone, got head_min_cameras={params['head_min_cameras']} > "
+                    f"min_cameras={params['min_cameras']})"
+                )
 
         output_root = Path(cfg.get("output_root") or OUTPUT_DIR)
         obj_dir = output_root / f"object_{object_id}"
+        fit_context = {}
 
         for frame_id, mask_paths in frames:
             log(f"--- {frame_id} ---")
@@ -78,7 +123,7 @@ def run_pipeline(cfg):
                 STATE["current_frame"] = frame_id
             try:
                 ordered = recon.match_masks_to_cameras(cameras, mask_paths)
-                result = recon.reconstruct_frame(cameras, ordered, params, log=log)
+                result = recon.reconstruct_frame(cameras, ordered, params, log=log, fit_context=fit_context)
                 verts, faces = result["verts"], result["faces"]
                 out_path = obj_dir / frame_id / "mesh.obj"
                 if result["atlas"] is not None:
@@ -86,12 +131,20 @@ def run_pipeline(cfg):
                 else:
                     recon.save_obj(out_path, verts, faces, colors=result["vertex_colors"])
                 log(f"    saved {out_path}  ({len(verts):,} verts, {len(faces):,} faces)")
+                entry = {
+                    "frame_id": frame_id, "verts": len(verts), "faces": len(faces),
+                    "output_path": str(out_path),
+                    "centre": result["centre"].tolist(),
+                }
+                if result["hull_verts"] is not None:
+                    hull_path = obj_dir / frame_id / "mesh_hull.obj"
+                    recon.save_obj(hull_path, result["hull_verts"], result["hull_faces"])
+                    log(f"    saved raw visual hull alongside: {hull_path.name}  "
+                        f"({len(result['hull_verts']):,} verts)")
+                    entry["completion"] = "template"
+                    entry["supported_frac"] = result["fit_report"]["supported_frac"]
                 with STATE_LOCK:
-                    STATE["results"].append({
-                        "frame_id": frame_id, "verts": len(verts), "faces": len(faces),
-                        "output_path": str(out_path),
-                        "centre": result["centre"].tolist(),
-                    })
+                    STATE["results"].append(entry)
             except Exception as fe:
                 log(f"    FAILED: {fe}")
                 with STATE_LOCK:
@@ -159,7 +212,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({
                 "voxel_size": 0.002, "min_cameras": 4,
                 "half_xy": 0.20, "depth_below": 0.05, "depth_above": 0.20,
+                "head_min_cameras": "", "head_zone_frac": 0,
                 "smooth_iterations": 10, "texture_mode": "atlas", "atlas_size": 1536,
+                "completion_mode": "none",
+                # rat_brown.obj is not redistributed (third-party model); fall back to the procedural one
+                "template_path": str(next(p for p in (TOOL_DIR / "templates" / "rat_brown.obj",
+                                                      TOOL_DIR / "templates" / "rat_template.obj")
+                                          if p.is_file() or p.name == "rat_template.obj")),
+                "fit_iterations": 600, "fit_nodes": 200, "fit_sil_cameras": "",
                 "output_root": str(OUTPUT_DIR),
             })
             return

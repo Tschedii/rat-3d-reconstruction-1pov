@@ -20,8 +20,8 @@ gui_1_camera_calibration/work/
 session_config.json
 scene_placements.json
 eye_positions_*.json
-gui_3_scene_placement/exports/**
-!gui_3_scene_placement/exports/.gitkeep
+gui_4_scene_placement/exports/
+gui_4_scene_placement/eye_positions/
 
 # Generated data — keep the folder structure (.gitkeep), not the contents.
 # Ignoring "dir/**" would also ignore dir's subfolders themselves, which
@@ -49,3 +49,27 @@ gui_1_camera_calibration/output/*
 gui_2_rat_reconstruction/output/*
 !gui_1_camera_calibration/output/.gitkeep
 !gui_2_rat_reconstruction/output/.gitkeep
+
+# GUI 5.x runtime artefacts
+gui_5.*/exports/
+gui_5.*/cache/
+
+# Large or third-party assets (see README: not redistributed)
+gui_5.1_quaternion_placement/assets/*.stl
+gui_2_rat_reconstruction/templates/rat_brown.obj
+
+# video_rendering/ working folders (inputs, intermediate fits, frames, logs)
+video_rendering/inputs/
+video_rendering/data/
+video_rendering/frames*/
+video_rendering/refit*/
+video_rendering/variants/
+video_rendering/logs/
+video_rendering/qa/
+video_rendering/*.mp4
+
+# beast3d_export/ outputs
+beast3d_export/calib_check/
+
+# macOS resource forks from network drives
+._*

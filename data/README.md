@@ -1,6 +1,6 @@
 # `data/`
 
-This folder is the shared workspace between the four GUIs. It's empty on
+This folder is the shared workspace between the GUIs. It's empty on
 a fresh clone (only `.gitkeep` files are tracked) — everything inside is
 generated locally or dropped in by you, and stays out of git via
 [`.gitignore`](../.gitignore).
@@ -17,11 +17,11 @@ data/
 │   ├── frame_000000/cutouts/rat_2/camera_001.png …        (layout B, alternative)
 │   └── camera_001/cutouts/rat_1/frame_000000.png …        (layout C, alternative)
 ├── meshes/
-│   ├── rat/                   ⇄ Step 2 output → Step 4 input
+│   ├── rat/                   ⇄ Step 2 output → input of Steps 3 to 5
 │   │   └── object_<id>/frame_000000/mesh.obj
-│   └── environment/           → input:  Step 3 (arena/box .obj + .mtl + textures)
-├── eye_positions/              → output: Step 4 (eyeL/eyeR/head basis per frame, per object)
-└── scenes/                     → output: Step 3 (exported scene placements / textured .obj)
+│   └── environment/           → input:  Step 4 (arena/box .obj + .mtl + textures)
+├── eye_positions/              → output: Step 3 (eyeL/eyeR/head basis per frame, per object)
+└── scenes/                     → output: Step 4 (exported scene placements / textured .obj)
 ```
 
 ## Camera videos — `raw_videos/`
@@ -57,20 +57,20 @@ found.
   written by **GUI 2**, textured with real fur colour sampled from the
   same cutouts used for carving. Default `texture_mode` (`atlas`) also
   writes a `mesh.mtl` + `mesh_texture.png` alongside it — a real baked
-  texture image, viewable in any OBJ-capable tool. For **GUI 4** (eye
+  texture image, viewable in any OBJ-capable tool. For **GUI 3** (eye
   marking), point it at a per-frame preview named `mesh_preview.ply` (a
   lightweight/decimated version of the same mesh works well for smooth
   interactive marking).
 - `environment/` — your static scene mesh (arena, box, table — `.obj` /
-  `.mtl` / textures), placed manually. Loaded by **GUI 3**.
+  `.mtl` / textures), placed manually. Loaded by **GUI 4**.
 
 ## Eye positions — `eye_positions/`
-`eye_positions_<object_label>.json`, written by **GUI 4**:
+`eye_positions_<object_label>.json`, written by **GUI 3**:
 `{ frame_id: { eyeL, eyeR, headForward, headRight, headUp, source } }` —
 the geometry behind the rat's-eye / first-person view.
 
 ## Scenes — `scenes/`
-**GUI 3** writes textured scene exports to its own
-`gui_3_scene_placement/exports/scene_<timestamp>/` folder (`scene.obj` +
+**GUI 4** writes textured scene exports to its own
+`gui_4_scene_placement/exports/scene_<timestamp>/` folder (`scene.obj` +
 `scene.mtl` + copied textures) — move the ones you want to keep into
 `data/scenes/` for a tidy, versioned record of finalized placements.

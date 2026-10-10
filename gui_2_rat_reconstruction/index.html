@@ -101,11 +101,39 @@
   <div class="card">
     <div class="section-label">Reconstruction parameters</div>
     <div class="params-grid" id="paramsGrid"></div>
+    <div class="row" style="margin-top:12px;">
+      <div class="field" style="max-width:280px;">
+        <label>head zone: relaxed min cameras (blank = off)</label>
+        <input type="number" step="1" min="1" id="p_head_min_cameras" placeholder="e.g. 3">
+      </div>
+      <div class="field" style="max-width:280px;">
+        <label>head zone: top fraction of depth_above</label>
+        <input type="number" step="0.05" min="0" max="1" id="p_head_zone_frac" value="0">
+      </div>
+    </div>
+    <div class="hint">Applies the relaxed min-cameras threshold only to voxels in the top fraction of the box's depth_above range (the raised end -- typically the head) instead of lowering min_cameras everywhere, which also lets under-constrained noise through elsewhere (ghost/wing artifacts). If the head is being carved away under the normal min_cameras, try head_min_cameras=3 with head_zone_frac=0.15-0.3.</div>
     <div class="field" style="margin-top:12px; max-width:320px;">
       <label>surface smoothing (Taubin iterations)</label>
       <input type="number" step="1" min="0" id="p_smooth_iterations">
       <div class="hint">removes the blocky marching-cubes "staircase" look without shrinking the mesh; 0 disables smoothing.</div>
     </div>
+    <div class="section-label" style="margin-top:16px;">Completion</div>
+    <div class="radio-group">
+      <label><input type="radio" name="completionMode" value="none" checked> visual hull only</label>
+      <label><input type="radio" name="completionMode" value="template"> fit a rat template (model-based completion)</label>
+    </div>
+    <div id="completionFields" style="display:none;">
+      <div class="field">
+        <label>template mesh (.obj) -- bundled: templates/rat_brown.obj (default, from a scanned brown-rat model) or templates/rat_template.obj (procedural); or any external rat model / one of your own complete reconstructions</label>
+        <input type="text" id="p_template_path">
+      </div>
+      <div class="row">
+        <div class="field" style="max-width:200px;"><label>fit iterations</label><input type="number" step="50" min="1" id="p_fit_iterations"></div>
+        <div class="field" style="max-width:200px;"><label>deformation nodes</label><input type="number" step="10" min="2" id="p_fit_nodes"></div>
+        <div class="field" style="max-width:260px;"><label>containment cameras (blank = half)</label><input type="number" step="1" min="1" id="p_fit_sil_cameras" placeholder="e.g. 3"></div>
+      </div>
+    </div>
+    <div class="hint">"fit a rat template" deforms a complete rat mesh (embedded deformation graph, optimised with PyTorch on CPU) so that it matches the 6 silhouettes and the carved hull: where the cameras agree the result follows the data, where too few cameras see a part (typically the head) the template's anatomy fills it in. The raw hull is still saved next to it as mesh_hull.obj. Needs <code>pip install torch</code>; adds roughly two minutes per frame on an 8-core CPU (less when a sequence warm-starts frame to frame). "containment cameras" is how many cameras a surface point must project inside of -- half the rig by default, which lets a part exist that only a minority of cameras see.</div>
     <div class="section-label" style="margin-top:16px;">Texture</div>
     <div class="radio-group">
       <label><input type="radio" name="textureMode" value="atlas" checked> baked texture atlas</label>
@@ -158,9 +186,16 @@ const PARAM_FIELDS = [
 async function init() {
   defaults = await (await fetch(`${API}/api/defaults`)).json();
   document.getElementById('outputRoot').value = defaults.output_root;
+  document.getElementById('p_head_min_cameras').value = defaults.head_min_cameras ?? '';
+  document.getElementById('p_head_zone_frac').value = defaults.head_zone_frac ?? 0;
   document.getElementById('p_smooth_iterations').value = defaults.smooth_iterations;
   document.getElementById('p_atlas_size').value = defaults.atlas_size;
   document.querySelector(`input[name=textureMode][value="${defaults.texture_mode}"]`).checked = true;
+  document.querySelector(`input[name=completionMode][value="${defaults.completion_mode}"]`).checked = true;
+  document.getElementById('p_template_path').value = defaults.template_path;
+  document.getElementById('p_fit_iterations').value = defaults.fit_iterations;
+  document.getElementById('p_fit_nodes').value = defaults.fit_nodes;
+  document.getElementById('p_fit_sil_cameras').value = defaults.fit_sil_cameras ?? '';
 
   const grid = document.getElementById('paramsGrid');
   PARAM_FIELDS.forEach(([key, label]) => {
@@ -172,12 +207,19 @@ async function init() {
 
   document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', updateModeFields));
   document.querySelectorAll('input[name=textureMode]').forEach(r => r.addEventListener('change', updateTextureModeFields));
+  document.querySelectorAll('input[name=completionMode]').forEach(r => r.addEventListener('change', updateCompletionFields));
   updateTextureModeFields();
+  updateCompletionFields();
 }
 
 function updateTextureModeFields() {
   const mode = document.querySelector('input[name=textureMode]:checked').value;
   document.getElementById('atlasSizeField').style.display = mode === 'atlas' ? 'flex' : 'none';
+}
+
+function updateCompletionFields() {
+  const mode = document.querySelector('input[name=completionMode]:checked').value;
+  document.getElementById('completionFields').style.display = mode === 'template' ? 'block' : 'none';
 }
 
 function updateModeFields() {
@@ -208,9 +250,18 @@ function collectConfig() {
     cfg.step = parseInt(document.getElementById('seqStep').value) || 1;
   }
   PARAM_FIELDS.forEach(([key]) => { cfg[key] = parseFloat(document.getElementById(`p_${key}`).value); });
+  const headMinCamerasRaw = document.getElementById('p_head_min_cameras').value.trim();
+  cfg.head_min_cameras = headMinCamerasRaw === '' ? null : parseInt(headMinCamerasRaw);
+  cfg.head_zone_frac = parseFloat(document.getElementById('p_head_zone_frac').value) || 0;
   cfg.smooth_iterations = parseInt(document.getElementById('p_smooth_iterations').value) || 0;
   cfg.texture_mode = document.querySelector('input[name=textureMode]:checked').value;
   cfg.atlas_size = parseInt(document.getElementById('p_atlas_size').value) || 1536;
+  cfg.completion_mode = document.querySelector('input[name=completionMode]:checked').value;
+  cfg.template_path = document.getElementById('p_template_path').value.trim();
+  cfg.fit_iterations = parseInt(document.getElementById('p_fit_iterations').value) || 600;
+  cfg.fit_nodes = parseInt(document.getElementById('p_fit_nodes').value) || 200;
+  const fitSilRaw = document.getElementById('p_fit_sil_cameras').value.trim();
+  cfg.fit_sil_cameras = fitSilRaw === '' ? null : parseInt(fitSilRaw);
   return cfg;
 }
 
@@ -264,7 +315,9 @@ async function poll() {
     if (r.error) {
       tr.innerHTML = `<td>${r.frame_id}</td><td>-</td><td>-</td><td class="err">${r.error}</td>`;
     } else {
-      tr.innerHTML = `<td>${r.frame_id}</td><td>${r.verts.toLocaleString()}</td><td>${r.faces.toLocaleString()}</td><td class="ok">${r.output_path}</td>`;
+      const note = r.completion === 'template'
+        ? ` <span style="opacity:.7">(template-completed; ${Math.round(r.supported_frac * 100)}% of the surface inside the masks, + mesh_hull.obj)</span>` : '';
+      tr.innerHTML = `<td>${r.frame_id}</td><td>${r.verts.toLocaleString()}</td><td>${r.faces.toLocaleString()}</td><td class="ok">${r.output_path}${note}</td>`;
     }
     body.appendChild(tr);
   });

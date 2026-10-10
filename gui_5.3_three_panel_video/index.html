@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three-panel video</title>
+<style>
+  :root { --bg: #14120e; --card: #1d1b16; --line: #34312a; --text: #e8e4da; --muted: #8a867c; --accent: #e0631e; --err: #f08a7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+  .eyebrow { color: var(--accent); font: 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 6px; }
+  h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; }
+  .lead { color: var(--muted); margin: 0 0 20px; max-width: 820px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  section h2 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input { width: 100%; background: #0f0e0b; border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 7px 9px; font: 13px ui-monospace, Menlo, monospace; }
+  input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .buttons { display: flex; gap: 10px; margin: 16px 0 10px; flex-wrap: wrap; }
+  button { background: #2a2721; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #140a03; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  #info { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; margin: 0; }
+  #info.err, .err { color: var(--err); }
+  .bar { height: 8px; background: #0f0e0b; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  #log { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; max-height: 160px; overflow: auto; margin: 0; }
+  video { width: 100%; margin-top: 12px; border-radius: 6px; background: #000; display: none; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Pipeline stage 6</p>
+  <h1>Three-panel video</h1>
+  <p class="lead">Left: the camera view with both rats marked (tracked rat red, the other blue) and the tracked rat's
+    head and recent head path. Top right: the rotating IMU skull from GUI 5's skull export. Bottom right: the head
+    path in 3D. Frames are matched by recording frame number. Two rats (a GUI 5.2 two-rat run folder and GUI 5.1's
+    side-by-side skull export): rat 1 red and rat 2 blue in every panel, the two skulls side by side on the right.</p>
+
+  <div class="grid">
+    <section>
+      <h2>Inputs</h2>
+      <label for="camera_video_path">camera video (raw cam_N.mp4; N picks the rig camera)</label>
+      <input id="camera_video_path" placeholder="/path/to/recording/cam_1.mp4">
+      <label for="calib_json_path">rig calibration JSON (GUI 1)</label>
+      <input id="calib_json_path" placeholder="/path/to/calibration/2026_09_21.json">
+      <label for="masks_root">masks root with cam_N/masks_raw (optional: tints the rats)</label>
+      <input id="masks_root" placeholder="/path/to/recording">
+      <label for="head_tracking_dir">head tracking export folder (GUI 5.2: one rat's folder with head_pose_world.csv, or a two-rat run folder with rat1/ and rat2/)</label>
+      <input id="head_tracking_dir" placeholder="/path/to/gui_5.2_head_tracking/exports/masks_..._000000-001400">
+      <label for="skull_video_path">skull video (GUI 5.1 export, ..._skull_&lt;first&gt;-&lt;last&gt;_....mp4; for two rats the side-by-side "both" one)</label>
+      <input id="skull_video_path" placeholder="/path/to/gui_5/exports/..._skull_0-1400_....mp4">
+    </section>
+
+    <section>
+      <h2>Frames and output</h2>
+      <div class="row">
+        <div><label for="frame_start">first frame</label><input id="frame_start" type="number" placeholder="all inputs"></div>
+        <div><label for="frame_end">last frame</label><input id="frame_end" type="number" placeholder="all inputs"></div>
+        <div><label for="skull_first_frame">skull video starts at frame</label><input id="skull_first_frame" type="number" placeholder="from file name"></div>
+      </div>
+      <p class="hint">Blank first/last frame = every frame all three inputs cover.</p>
+      <label for="output_path">output video (.mp4)</label>
+      <input id="output_path" placeholder="default: on the Desktop">
+      <h2 style="margin-top:16px">Look</h2>
+      <div class="row">
+        <div><label for="height_px">video height (px)</label><input id="height_px" type="number" step="2"></div>
+        <div><label for="trail_seconds">head trail on camera (s)</label><input id="trail_seconds" type="number" step="0.5"></div>
+        <div><label for="tint_alpha">rat tint strength (0-1)</label><input id="tint_alpha" type="number" step="0.05" min="0" max="1"></div>
+        <div><label for="floor_z_m">arena floor height (m, table frame)</label><input id="floor_z_m" type="number" step="0.005"></div>
+        <div><label for="orbit_deg_per_s">3D view orbit (deg/s)</label><input id="orbit_deg_per_s" type="number" step="1"></div>
+        <div><label for="elevation_deg">3D view elevation (deg)</label><input id="elevation_deg" type="number" step="1"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="buttons">
+    <button id="checkBtn">Check inputs</button>
+    <button id="renderBtn" class="primary">Render video</button>
+  </div>
+  <pre id="info"></pre>
+
+  <section id="progressBox" style="display:none; margin-top:12px">
+    <h2>Render</h2>
+    <div class="bar"><div id="barFill"></div></div>
+    <pre id="log"></pre>
+    <video id="player" controls></video>
+  </section>
+</main>
+
+<script>
+const FIELDS = ["camera_video_path", "calib_json_path", "masks_root", "head_tracking_dir", "skull_video_path",
+  "frame_start", "frame_end", "skull_first_frame", "output_path",
+  "height_px", "trail_seconds", "tint_alpha", "floor_z_m", "orbit_deg_per_s", "elevation_deg"];
+const $ = (id) => document.getElementById(id);
+
+function formValues() {
+  const o = {};
+  for (const k of FIELDS) o[k] = $(k).value;
+  return o;
+}
+
+function showInfo(text, isError) {
+  $("info").textContent = text;
+  $("info").className = isError ? "err" : "";
+}
+
+async function post(path) {
+  const r = await fetch(path, { method: "POST", body: JSON.stringify(formValues()) });
+  return r.json();
+}
+
+async function check() {
+  showInfo("checking…");
+  const d = await post("/api/inspect");
+  if (!d.ok) { showInfo(d.error, true); return; }
+  const r = d.ranges;
+  showInfo(
+    `camera ${d.camera} (${d.camera_size[0]}x${d.camera_size[1]}), ` +
+    (d.rats.length > 1 ? `two rats: ${d.rats.map(r => `rat ${r} (object ${r}, ${r === 1 ? 'red' : 'blue'})`).join(', ')}` : `tracked rat = mask label ${d.mask_label}`) +
+    ` (skull video squares: ${Object.entries(d.skull_slots).map(([r, s]) => `rat ${r} ${s === null ? 'not in it' : '#' + (s + 1)}`).join(', ')}), ${d.fps} fps\n` +
+    `head tracking frames ${r.head_tracking[0]}..${r.head_tracking[1]}   camera video ${r.camera_video[0]}..${r.camera_video[1]}   ` +
+    `skull video ${r.skull_video[0]}..${r.skull_video[1]}\n` +
+    `will render frames ${d.frame_start}..${d.frame_end} (${d.frame_end - d.frame_start + 1} frames, ` +
+    `${((d.frame_end - d.frame_start + 1) / d.fps).toFixed(1)} s)`);
+}
+
+let timer = null;
+async function start() {
+  const d = await post("/api/render");
+  if (!d.ok) { showInfo(d.error, true); return; }
+  showInfo("");
+  $("progressBox").style.display = "block";
+  $("player").style.display = "none";
+  $("renderBtn").disabled = true;
+  timer = setInterval(poll, 1000);
+  poll();
+}
+
+async function poll() {
+  const d = await (await fetch("/api/progress")).json();
+  $("barFill").style.width = d.total ? `${(100 * d.done / d.total).toFixed(1)}%` : "0";
+  $("log").textContent = d.log.join("\n") + (d.running && d.total ? `\n${d.done} / ${d.total} frames` : "");
+  if (d.running) return;
+  clearInterval(timer);
+  $("renderBtn").disabled = false;
+  if (d.error) { $("log").textContent += `\n${d.error}`; $("log").classList.add("err"); return; }
+  $("log").classList.remove("err");
+  if (d.result) {
+    $("player").src = `/api/video?t=${Date.now()}`;
+    $("player").style.display = "block";
+  }
+}
+
+(async () => {
+  const cfg = await (await fetch("/api/config")).json();
+  for (const k of FIELDS) $(k).value = cfg[k] ?? "";
+  const p = await (await fetch("/api/progress")).json();
+  if (p.running) { $("progressBox").style.display = "block"; $("renderBtn").disabled = true; timer = setInterval(poll, 1000); }
+})();
+$("checkBtn").onclick = check;
+$("renderBtn").onclick = start;
+</script>
+</body>
+</html>

@@ -17,21 +17,22 @@
   h1 { font-size: 22px; font-weight: 600; margin: 0 0 22px 0; }
   .card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }
   .section-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; font-family: var(--mono); }
-  .cam-row { display: grid; grid-template-columns: 110px 1fr 90px; gap: 10px; align-items: center; margin-bottom: 8px; }
-  .cam-row label { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
   input[type=text], input[type=number] {
     font-family: var(--mono); font-size: 12.5px; padding: 7px 9px; border-radius: 6px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
   }
   input[type=text]:focus, input[type=number]:focus { outline: none; border-color: var(--accent); }
-  .ref-radio { display: flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
   .params-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 16px; }
   .param { display: flex; flex-direction: column; gap: 4px; }
   .param label { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .folder-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
   button { font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 10px 18px; border-radius: 7px;
-    border: 1px solid var(--accent); background: var(--accent); color: #1a1608; cursor: pointer; }
+    border: 1px solid var(--accent); background: var(--accent); color: #1a1608; cursor: pointer; white-space: nowrap; }
+  button.secondary { background: transparent; color: var(--accent); }
   button:hover { filter: brightness(1.08); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .btn-row .spacer { flex: 1; }
   #log { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); background: #100f0b;
     border: 1px solid var(--border); border-radius: 8px; padding: 12px; height: 260px; overflow-y: auto; white-space: pre-wrap; }
   .status-badge { font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); }
@@ -43,6 +44,22 @@
   .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .out-path { font-family: var(--mono); font-size: 12px; color: var(--accent); word-break: break-all; margin-top: 8px; }
   .hint { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); line-height: 1.6; margin-top: 10px; }
+  .hint.err { color: #e88; }
+  table.quality { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; margin-top: 12px; }
+  table.quality th, table.quality td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  table.quality th { color: var(--text-dim); font-weight: 500; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  table.quality td:first-child, table.quality th:first-child { text-align: left; }
+  table.quality td.left, table.quality th.left { text-align: left; }
+  table.quality td.bad { color: #e88; }
+  table.quality td.ref, table.quality td.dim { color: var(--text-dim); }
+  .warnings { margin-top: 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; }
+  .warnings .warn { color: #f4a261; padding: 4px 0; }
+  .warnings .ok { color: #7fd79a; }
+  .ref-radio { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .options { display: flex; flex-direction: column; gap: 8px; }
+  .opt { display: flex; align-items: flex-start; gap: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--text); line-height: 1.5; cursor: pointer; }
+  .opt input { margin-top: 3px; accent-color: var(--accent); }
+  .opt span.dim { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -51,9 +68,21 @@
   <h1>Checkerboard camera calibration</h1>
 
   <div class="card">
-    <div class="section-label">6 camera videos</div>
-    <div id="camRows"></div>
-    <div class="hint">enter the full local path to each camera's checkerboard calibration video, and mark which camera is the reference (identity rotation/zero translation in the output).</div>
+    <div class="section-label">Video folders</div>
+    <div class="folder-row">
+      <div class="param">
+        <label>intrinsic videos folder(s) (cam1.mp4 … cam6.mp4) — separate several sessions with ;</label>
+        <input type="text" id="intrinsicFolder" placeholder="/path/to/session_1; /path/to/session_2">
+      </div>
+      <div class="param">
+        <label>extrinsic videos folder (optional — defaults to the intrinsic folder)</label>
+        <input type="text" id="extrinsicFolder" placeholder="/path/to/extrinsic_videos">
+      </div>
+      <button class="secondary" id="scanBtn">Scan folders</button>
+    </div>
+    <div class="hint">each folder holds one video per camera. Any name containing a camera number works: cam1.mp4, cam_01.mov, camera_001.mp4 … → camera_001. Intrinsic videos should sweep the board across the whole image of ONE camera at a time; several intrinsic folders (sessions) are pooled per camera, which is valid as long as focus / aperture were not touched between them. Extrinsic videos must be recorded synchronously with the board visible to all cameras, from ONE session.</div>
+    <table class="quality" id="camTable" style="display:none;"></table>
+    <div class="hint err" id="scanError"></div>
   </div>
 
   <div class="card">
@@ -62,25 +91,50 @@
   </div>
 
   <div class="card">
-    <div class="section-label">Output</div>
-    <div class="param" style="max-width:300px;">
-      <label>output json filename (defaults to today's date)</label>
-      <input type="text" id="outputName">
+    <div class="section-label">Extrinsic solve options</div>
+    <div class="options">
+      <label class="opt"><input type="checkbox" id="o_bundle_adjust">
+        <span>bundle adjustment <span class="dim">— refine all camera poses and all board poses jointly (Huber loss) instead of only averaging the per-frame relative transforms. Recommended.</span></span></label>
+      <label class="opt"><input type="checkbox" id="o_refine_focal">
+        <span>also refine fx per camera <span class="dim">— diagnostic: if fx moves by more than ~0.5 % the fixed intrinsics were limiting the rig solve and deserve a recalibration (pool sessions, larger board).</span></span></label>
+      <label class="opt"><input type="checkbox" id="o_reuse_synced_frames">
+        <span>reuse already extracted synced frames <span class="dim">— skip stage 2 and re-solve on the frames in work/external_parameter from the last run (fast; no new video needed).</span></span></label>
     </div>
   </div>
 
   <div class="card">
-    <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
-      <button id="runBtn">Run calibration</button>
+    <div class="section-label">Output</div>
+    <div class="params-grid" style="grid-template-columns: 300px 1fr;">
+      <div class="param">
+        <label>output name (defaults to today's date)</label>
+        <input type="text" id="outputName">
+      </div>
+      <div class="param">
+        <label>intrinsics json for "Run extrinsics" (auto-filled after "Run intrinsics")</label>
+        <input type="text" id="intrinsicsJson" placeholder="/path/to/output/2026_09_17_intrinsics.json">
+      </div>
+    </div>
+    <div class="hint">intrinsics only → <b>&lt;name&gt;_intrinsics.json</b>. Extrinsics / both → <b>&lt;name&gt;.json</b> + rig plots. "Run extrinsics" keeps the focal length / distortion from the intrinsics json fixed (unless "refine fx" is ticked) and solves the rig geometry; "Run both" calibrates intrinsics from the intrinsic folder(s) first. All reprojection errors are RMS per corner in px (target &lt; 0.7 px after bundle adjustment).</div>
+  </div>
+
+  <div class="card">
+    <div class="btn-row">
+      <button id="runIntrBtn" data-mode="intrinsics">Run intrinsics</button>
+      <button id="runExtrBtn" data-mode="extrinsics">Run extrinsics</button>
+      <button id="runBothBtn" data-mode="both">Run both</button>
+      <span class="spacer"></span>
       <span class="status-badge status-idle" id="statusBadge">idle</span>
     </div>
     <div id="log"></div>
   </div>
 
   <div class="card results" id="resultsCard" style="display:none;">
-    <div class="section-label">Result</div>
+    <div class="section-label" id="resultsLabel">Result</div>
     <div class="out-path" id="outPath"></div>
-    <div class="results-grid">
+    <div class="hint" id="qualitySummary"></div>
+    <table class="quality" id="qualityTable"></table>
+    <div class="warnings" id="warnings"></div>
+    <div class="results-grid" id="plots">
       <div><img id="perspectiveImg"></div>
       <div><img id="topImg"></div>
     </div>
@@ -90,6 +144,8 @@
 <script>
 const API = 'http://127.0.0.1:8971';
 let defaults = null;
+let scanned = { intrinsic: null, extrinsic: null };   // {cameras:[{name,file,path}], skipped:[]} or null
+let selectedRef = null;
 
 const PARAM_FIELDS = [
   ["board_w", "board inner corners (W)"],
@@ -104,25 +160,21 @@ const PARAM_FIELDS = [
   ["sample_every_n", "intrinsics: sample every Nth frame"],
   ["synced_sample_every_n", "extrinsics: sample every Nth frame"],
   ["synced_max_frames", "extrinsics: max synced frame sets"],
-  ["outlier_threshold_px", "outlier reprojection threshold (px)"],
+  ["synced_min_frame_gap", "extrinsics: min frames between kept sets"],
+  ["synced_min_pose_distance", "extrinsics: min board rotation change (rad)"],
+  ["synced_min_trans_distance", "extrinsics: min board translation change (m)"],
+  ["outlier_threshold_px", "intrinsics: drop images above (px RMS/corner)"],
+  ["frame_outlier_px", "extrinsics: drop frame sets above (px RMS/corner)"],
 ];
+const OPTION_FIELDS = ["bundle_adjust", "refine_focal", "reuse_synced_frames"];
+
+const $ = id => document.getElementById(id);
 
 async function init() {
   defaults = await (await fetch(`${API}/api/defaults`)).json();
+  selectedRef = defaults.reference_camera;
 
-  const camRows = document.getElementById('camRows');
-  defaults.camera_names.forEach(name => {
-    const row = document.createElement('div');
-    row.className = 'cam-row';
-    row.innerHTML = `
-      <label>${name}</label>
-      <input type="text" data-cam="${name}" placeholder="/path/to/${name}.mp4">
-      <label class="ref-radio"><input type="radio" name="refcam" value="${name}" ${name === defaults.reference_camera ? 'checked' : ''}> reference</label>
-    `;
-    camRows.appendChild(row);
-  });
-
-  const grid = document.getElementById('paramsGrid');
+  const grid = $('paramsGrid');
   PARAM_FIELDS.forEach(([key, label]) => {
     const div = document.createElement('div');
     div.className = 'param';
@@ -130,28 +182,91 @@ async function init() {
     grid.appendChild(div);
   });
 
-  document.getElementById('outputName').value = defaults.output_name;
+  OPTION_FIELDS.forEach(key => { $(`o_${key}`).checked = !!defaults[key]; });
+  $('outputName').value = defaults.output_name;
+  $('intrinsicsJson').value = defaults.intrinsics_json || '';
+  $('intrinsicFolder').value = defaults.intrinsic_folder || '';
+  $('extrinsicFolder').value = defaults.extrinsic_folder || '';
 }
 
-function collectConfig() {
-  const cameras = [];
-  document.querySelectorAll('[data-cam]').forEach(inp => {
-    cameras.push({ name: inp.dataset.cam, video_path: inp.value.trim() });
+// ---------------------------------------------------------------- folder scan
+async function scanFolders() {
+  const intr = $('intrinsicFolder').value.trim();
+  const extr = $('extrinsicFolder').value.trim();
+  const url = `${API}/api/scan?intrinsic=${encodeURIComponent(intr)}&extrinsic=${encodeURIComponent(extr)}`;
+  const res = await (await fetch(url)).json();
+  scanned.intrinsic = res.intrinsic.ok && !res.intrinsic.empty ? res.intrinsic : null;
+  scanned.extrinsic = res.extrinsic.ok && !res.extrinsic.empty ? res.extrinsic : null;
+
+  const errs = [];
+  if (!res.intrinsic.ok) errs.push(`intrinsic folder: ${res.intrinsic.error}`);
+  if (!res.extrinsic.ok) errs.push(`extrinsic folder: ${res.extrinsic.error}`);
+  $('scanError').textContent = errs.join('\n');
+  renderCamTable();
+}
+
+function renderCamTable() {
+  const table = $('camTable');
+  const names = new Set();
+  (scanned.intrinsic?.cameras || []).forEach(c => names.add(c.name));
+  (scanned.extrinsic?.cameras || []).forEach(c => names.add(c.name));
+  if (!names.size) { table.style.display = 'none'; return; }
+
+  const byName = (scan) => Object.fromEntries((scan?.cameras || []).map(c => [c.name, c.file]));
+  const intrFiles = byName(scanned.intrinsic), extrFiles = byName(scanned.extrinsic);
+  const sorted = [...names].sort();
+  if (!sorted.includes(selectedRef)) selectedRef = sorted[0];
+
+  const sessions = scanned.intrinsic?.sessions || 1;
+  const extrHeader = scanned.extrinsic ? 'extrinsic video'
+    : (sessions > 1 ? 'extrinsic video (missing — set the folder explicitly)' : 'extrinsic video (= intrinsic folder)');
+  const intrHeader = sessions > 1 ? `intrinsic videos (${sessions} pooled sessions)` : 'intrinsic video';
+  let html = `<tr><th>camera</th><th class="left">${intrHeader}</th><th class="left">${extrHeader}</th><th>reference</th></tr>`;
+  sorted.forEach(n => {
+    const i = intrFiles[n], e = scanned.extrinsic ? extrFiles[n] : (sessions > 1 ? null : intrFiles[n]);
+    html += `<tr><td>${n}</td>` +
+      `<td class="left ${i ? '' : 'bad'}">${i || 'missing'}</td>` +
+      `<td class="left ${e ? '' : 'bad'}">${e || 'missing'}</td>` +
+      `<td><label class="ref-radio"><input type="radio" name="refcam" value="${n}" ${n === selectedRef ? 'checked' : ''}></label></td></tr>`;
   });
-  const missing = cameras.filter(c => !c.video_path);
-  if (missing.length) {
-    alert(`Missing video path for: ${missing.map(c => c.name).join(', ')}`);
+  const skipped = [...(scanned.intrinsic?.skipped || []), ...(scanned.extrinsic?.skipped || [])];
+  if (skipped.length) {
+    html += `<tr><td colspan="4" class="left dim">ignored (no camera number in file name): ${[...new Set(skipped)].join(', ')}</td></tr>`;
+  }
+  table.innerHTML = html;
+  table.style.display = 'table';
+  table.querySelectorAll('input[name=refcam]').forEach(r => r.addEventListener('change', () => { selectedRef = r.value; }));
+}
+
+// ---------------------------------------------------------------- run
+function collectConfig(mode) {
+  const intr = $('intrinsicFolder').value.trim();
+  const extr = $('extrinsicFolder').value.trim();
+  const intrJson = $('intrinsicsJson').value.trim();
+
+  if ((mode === 'intrinsics' || mode === 'both') && !intr) {
+    alert('Please enter the intrinsic videos folder.'); return null;
+  }
+  const reuse = $('o_reuse_synced_frames').checked;
+  if (mode === 'extrinsics') {
+    if (!extr && !intr && !reuse) { alert('Please enter the extrinsic videos folder (or the intrinsic folder to reuse those videos).'); return null; }
+    if (!intrJson) { alert('"Run extrinsics" needs an intrinsics json. Run "Run intrinsics" first, or point the field at a previous calibration json.'); return null; }
+  }
+  if ((mode === 'extrinsics' || mode === 'both') && !extr && intr.split(/[;\n]/).filter(s => s.trim()).length > 1) {
+    alert('Several intrinsic folders are given (pooled sessions). The extrinsic folder must then be set explicitly: the rig geometry has to come from ONE synchronous recording.');
     return null;
   }
-  const refEl = document.querySelector('input[name=refcam]:checked');
+
   const cfg = {
-    cameras,
-    reference_camera: refEl ? refEl.value : defaults.reference_camera,
-    output_name: document.getElementById('outputName').value.trim(),
+    mode,
+    intrinsic_folder: intr,
+    extrinsic_folder: extr,
+    intrinsics_json: intrJson,
+    reference_camera: selectedRef || defaults.reference_camera,
+    output_name: $('outputName').value.trim(),
   };
-  PARAM_FIELDS.forEach(([key]) => {
-    cfg[key] = parseFloat(document.getElementById(`p_${key}`).value);
-  });
+  PARAM_FIELDS.forEach(([key]) => { cfg[key] = parseFloat($(`p_${key}`).value); });
+  OPTION_FIELDS.forEach(key => { cfg[key] = $(`o_${key}`).checked; });
   if (!(cfg.square_size > 0)) {
     alert('square size (m) must be a positive number -- a zero or blank value makes every checkerboard corner collapse onto the same point and calibration cannot solve for anything.');
     return null;
@@ -165,8 +280,12 @@ function collectConfig() {
 
 let polling = null;
 
-async function runCalibration() {
-  const cfg = collectConfig();
+function setButtonsDisabled(disabled) {
+  ['runIntrBtn', 'runExtrBtn', 'runBothBtn'].forEach(id => { $(id).disabled = disabled; });
+}
+
+async function runCalibration(mode) {
+  const cfg = collectConfig(mode);
   if (!cfg) return;
   const res = await fetch(`${API}/api/run`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
@@ -176,36 +295,129 @@ async function runCalibration() {
     alert(`Could not start: ${err.error}`);
     return;
   }
-  document.getElementById('runBtn').disabled = true;
-  document.getElementById('resultsCard').style.display = 'none';
+  setButtonsDisabled(true);
+  $('resultsCard').style.display = 'none';
   if (polling) clearInterval(polling);
   polling = setInterval(pollProgress, 800);
 }
 
 async function pollProgress() {
   const state = await (await fetch(`${API}/api/progress`)).json();
-  const badge = document.getElementById('statusBadge');
-  badge.textContent = state.status;
+  const badge = $('statusBadge');
+  badge.textContent = state.mode ? `${state.status} · ${state.mode}` : state.status;
   badge.className = `status-badge status-${state.status}`;
-  document.getElementById('log').textContent = state.log.join('\n');
-  document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+  $('log').textContent = state.log.join('\n');
+  $('log').scrollTop = $('log').scrollHeight;
 
   if (state.status === 'done') {
     clearInterval(polling);
-    document.getElementById('runBtn').disabled = false;
-    document.getElementById('resultsCard').style.display = 'block';
-    document.getElementById('outPath').textContent = `saved: ${state.result.json_path}`;
-    document.getElementById('perspectiveImg').src = `${API}/files/${state.result.perspective_png}?t=${Date.now()}`;
-    document.getElementById('topImg').src = `${API}/files/${state.result.top_view_png}?t=${Date.now()}`;
+    setButtonsDisabled(false);
+    renderResult(state.result);
   } else if (state.status === 'error') {
     clearInterval(polling);
-    document.getElementById('runBtn').disabled = false;
+    setButtonsDisabled(false);
+  } else if (state.status === 'running') {
+    setButtonsDisabled(true);
   }
 }
 
-document.getElementById('runBtn').addEventListener('click', runCalibration);
-init();
-pollProgress();
+// ---------------------------------------------------------------- results
+function renderResult(result) {
+  if (!result) return;
+  $('resultsCard').style.display = 'block';
+  if (result.mode === 'intrinsics') {
+    $('resultsLabel').textContent = 'Result — intrinsics';
+    $('outPath').textContent = `saved: ${result.intrinsics_json_path}`;
+    $('intrinsicsJson').value = result.intrinsics_json_path;   // ready for "Run extrinsics"
+    $('qualitySummary').textContent = `${result.intrinsics.length} camera(s) calibrated · path filled into the intrinsics json field above`;
+    $('plots').style.display = 'none';
+    renderIntrinsicsTable(result.intrinsics);
+  } else {
+    $('resultsLabel').textContent = result.mode === 'both' ? 'Result — intrinsics + extrinsics' : 'Result — extrinsics';
+    $('outPath').textContent = `saved: ${result.json_path}` +
+      (result.intrinsics_json_path ? `\nintrinsics: ${result.intrinsics_json_path}` : `\nintrinsics from: ${result.intrinsics_source || ''}`);
+    if (result.intrinsics_json_path) $('intrinsicsJson').value = result.intrinsics_json_path;
+    $('plots').style.display = 'grid';
+    renderQuality(result);
+    $('perspectiveImg').src = `${API}/files/${result.perspective_png}?t=${Date.now()}`;
+    $('topImg').src = `${API}/files/${result.top_view_png}?t=${Date.now()}`;
+  }
+  renderWarnings(result.warnings || []);
+}
+
+function renderIntrinsicsTable(rows) {
+  const fmt = (v, d) => (v == null ? '–' : v.toFixed(d));
+  let html = `<tr><th>camera</th><th class="left">video</th><th>fx (px)</th><th>fy (px)</th><th>cx</th><th>cy</th><th>k1</th><th>k2</th><th>rms (px)</th><th>images</th><th class="left">model</th></tr>`;
+  rows.forEach(r => {
+    html += `<tr><td>${r.name}</td><td class="left dim">${r.source_video || ''}</td>` +
+      `<td>${fmt(r.fx, 1)}</td><td>${fmt(r.fy, 1)}</td><td>${fmt(r.cx, 1)}</td><td>${fmt(r.cy, 1)}</td>` +
+      `<td>${fmt(r.k1, 4)}</td><td>${fmt(r.k2, 4)}</td>` +
+      `<td class="${r.rms_px > 0.8 ? 'bad' : ''}">${fmt(r.rms_px, 3)}</td>` +
+      `<td>${r.num_images_used == null ? '–' : r.num_images_used}</td><td class="left dim">${r.model || ''}</td></tr>`;
+  });
+  $('qualityTable').innerHTML = html;
+}
+
+function renderQuality(result) {
+  const fd = result.frame_diversity || {};
+  const dist = fd.board_distance_m, tilt = fd.board_tilt_deg;
+  const dropped = result.dropped_frames || [];
+  const ba = result.extrinsics_method === 'bundle_adjusted';
+  const finalLabel = ba ? 'bundle adjusted' : 'averaged rig';
+  $('qualitySummary').textContent =
+    `${result.num_frames_used} synced frame sets used` +
+    (dropped.length ? ` (${dropped.length} dropped as outliers: ${dropped.map(d => d.stem.replace('frame_', '#')).join(', ')})` : '') +
+    ` · reprojection RMS per corner: averaged rig ${result.overall_reprojection_averaged_px.toFixed(2)} px` +
+    (ba ? ` → bundle adjusted ${result.overall_reprojection_mean_px.toFixed(2)} px` : '') +
+    (dist ? ` · board distance ${dist.min.toFixed(2)}–${dist.max.toFixed(2)} m` : '') +
+    (tilt ? ` · board tilt ${tilt.min.toFixed(0)}–${tilt.max.toFixed(0)}°` : '') +
+    (fd.evaluated_in ? ` (seen from ${fd.evaluated_in})` : '');
+
+  const rows = result.quality || [];
+  const cls = (v, limit) => (v > limit ? ' class="bad"' : '');
+  const showFx = rows.some(r => r.fx_change_pct != null);
+  let html = `<tr><th>camera</th><th>averaged rig (px)</th><th>${finalLabel} (px)</th><th>max (px)</th>` +
+    `<th>translation std (mm)</th><th>rotation spread (°)</th><th>fx (px)</th>${showFx ? '<th>Δfx (%)</th>' : ''}` +
+    `<th>k1</th><th>intrinsic rms (px)</th></tr>`;
+  rows.forEach(r => {
+    const fxCell = showFx
+      ? (r.fx_change_pct == null ? '<td class="ref">–</td>' : `<td${Math.abs(r.fx_change_pct) > 0.5 ? ' class="bad"' : ''}>${r.fx_change_pct.toFixed(2)}</td>`)
+      : '';
+    if (r.is_reference) {
+      // averaged column = the PnP fit of the board in the reference camera itself
+      html += `<tr><td>${r.name} (ref)</td><td class="dim">${r.reproj_avg_mean_px.toFixed(3)}</td>` +
+        `<td${cls(r.reproj_mean_px, 1.0)}>${r.reproj_mean_px.toFixed(3)}</td>` +
+        `<td${cls(r.reproj_max_px, 3.0)}>${r.reproj_max_px.toFixed(3)}</td><td class="ref">–</td><td class="ref">–</td>` +
+        `<td>${r.fx.toFixed(1)}</td>${fxCell}<td>${r.k1.toFixed(4)}</td>` +
+        `<td>${r.intrinsic_rms_px == null ? '–' : r.intrinsic_rms_px.toFixed(3)}</td></tr>`;
+      return;
+    }
+    html += `<tr><td>${r.name}</td>` +
+      `<td class="dim">${r.reproj_avg_mean_px.toFixed(3)}</td>` +
+      `<td${cls(r.reproj_mean_px, 1.0)}>${r.reproj_mean_px.toFixed(3)}</td>` +
+      `<td${cls(r.reproj_max_px, 3.0)}>${r.reproj_max_px.toFixed(3)}</td>` +
+      `<td${cls(r.translation_std_mm, 15)}>${r.translation_std_mm.toFixed(1)}</td>` +
+      `<td${cls(r.rotation_spread_deg, 0.6)}>${r.rotation_spread_deg.toFixed(3)}</td>` +
+      `<td>${r.fx.toFixed(1)}</td>${fxCell}<td>${r.k1.toFixed(4)}</td>` +
+      `<td>${r.intrinsic_rms_px == null ? '–' : r.intrinsic_rms_px.toFixed(3)}</td></tr>`;
+  });
+  $('qualityTable').innerHTML = html;
+}
+
+function renderWarnings(warnings) {
+  $('warnings').innerHTML = warnings.length
+    ? warnings.map(w => `<div class="warn">⚠ ${w}</div>`).join('')
+    : `<div class="ok">✓ no quality warnings</div>`;
+}
+
+// ---------------------------------------------------------------- wiring
+$('scanBtn').addEventListener('click', scanFolders);
+$('intrinsicFolder').addEventListener('change', scanFolders);
+$('extrinsicFolder').addEventListener('change', scanFolders);
+['runIntrBtn', 'runExtrBtn', 'runBothBtn'].forEach(id => {
+  $(id).addEventListener('click', () => runCalibration($(id).dataset.mode));
+});
+init().then(pollProgress);
 </script>
 </body>
 </html>

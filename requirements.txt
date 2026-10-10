@@ -3,3 +3,9 @@ opencv-python
 scipy
 scikit-image
 matplotlib
+Pillow
+# optional: GUI 2 template completion
+torch
+# optional: GUI 2 prepare_template.py (converting an external rat model into a template)
+# trimesh
+# open3d

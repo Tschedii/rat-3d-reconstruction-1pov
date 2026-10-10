@@ -1,0 +1,369 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GUI 5 — Trajectory Tracing</title>
+<style>
+  :root {
+    --bg: #15140f; --bg-elevated: #1e1c15; --text: #f1ede1; --text-dim: #9c9686;
+    --accent: #c9a13b; --border: #34311f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); height: 100vh; width: 100vw; overflow: hidden; }
+
+  #setupOverlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .setup-card { width: 620px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 28px 30px; max-height: 90vh; overflow-y: auto; }
+  .setup-card h1 { font-size: 19px; margin: 0 0 4px 0; }
+  .eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px 0; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  input[type=text], input[type=number], select {
+    font-family: var(--mono); font-size: 12.5px; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button { font-family: var(--sans); font-size: 12.5px; padding: 9px 14px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .enter-btn { font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1a1608; margin-top: 6px; }
+  .hint { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); line-height: 1.6; margin-top: 4px; }
+  .warn { color: #e0a34a; font-family: var(--mono); font-size: 11px; margin-top: 8px; white-space: pre-wrap; }
+
+  #stage { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 10px; }
+  #videoWrap {
+    position: relative; box-shadow: 0 8px 40px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; background: #000;
+    width: min(800px, 92vw, calc(100vh - 250px)); aspect-ratio: 1 / 1; flex: 0 1 auto;
+  }
+  #videoImg { display: block; width: 100%; height: 100%; object-fit: contain; }
+  #overlayCanvas { position: absolute; inset: 0; pointer-events: none; width: 100%; height: 100%; }
+  /* one skull inset per rat, stacked down the right edge (rat 1 on top) */
+  #insets { position: absolute; top: 10px; right: 10px; width: 26%; display: flex; flex-direction: column; gap: 8px; }
+  .inset {
+    position: relative; width: 100%; aspect-ratio: 1 / 1;
+    background: rgba(21,20,15,0.82); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  .inset canvas { display: block; width: 100%; height: 100%; }
+  .inset.selected { border-color: #8a8270; }
+  .insetLegend { position: absolute; bottom: 6px; left: 8px; display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; color: #f1ede1; z-index: 2; pointer-events: none; background: rgba(0,0,0,0.45); padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
+  .insetSwatch, .ratSwatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .insetLabel { position: absolute; top: 5px; left: 8px; font-family: var(--mono); font-size: 9.5px; color: var(--text-dim); z-index: 2; pointer-events: none; }
+  .ratBtn { display: inline-flex; align-items: center; gap: 5px; }
+  .ratBox.off { opacity: 0.4; }
+  .rat-head { display: flex; align-items: center; gap: 8px; }
+  .rat-head label { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
+
+  #controls { display: flex; align-items: center; gap: 10px; width: min(800px, 92vw); flex: 0 0 auto; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  #controls button { padding: 6px 10px; white-space: nowrap; }
+  #frameSlider { flex: 1; accent-color: var(--accent); min-width: 0; }
+  .speedBtn.active { background: var(--accent); color: #1a1608; border-color: var(--accent); font-weight: 600; }
+  #status { flex: 0 0 auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: pre-wrap; width: min(800px, 92vw); }
+  #alignRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: min(800px, 92vw); flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  #alignRow label { display: flex; align-items: center; gap: 4px; }
+  #alignRow input[type=number] { width: 56px; padding: 4px 6px; }
+  #alignRow .checkLabel { gap: 6px; }
+  #videoWrap.clickMode, #videoWrap.clickMode #videoImg { cursor: crosshair; }
+  .inset.rotating { cursor: grab; touch-action: none; }
+  .inset.rotating.selected { outline: 2px solid var(--accent); }
+  .inset.rotating:active { cursor: grabbing; }
+  .toolRow select { width: auto; padding: 4px 6px; font-size: 11px; }
+  .toolRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: min(800px, 92vw); flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .toolRow button { padding: 5px 10px; font-size: 11.5px; white-space: nowrap; }
+  .toolRow label { display: flex; align-items: center; gap: 4px; }
+  .toolRow input[type=number] { width: 72px; padding: 4px 6px; }
+  .toolRow input[type=text] { width: 230px; padding: 4px 6px; }
+  .toolRow .rowLabel { color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; min-width: 64px; }
+  button.on { background: var(--accent); color: #1a1608; border-color: var(--accent); font-weight: 600; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 10px; padding: 1px 4px 1px 8px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
+  .chip .x { color: var(--text-dim); padding: 0 3px; }
+  .chip .x:hover { color: #e0a34a; }
+  #headMsg.err, #exportMsg.err { color: #e0a34a; }
+  .section-label { font-family: var(--mono); font-size: 10.5px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 6px 0; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+</style>
+</head>
+<body>
+
+<div id="setupOverlay">
+  <div class="setup-card">
+    <p class="eyebrow">GUI 5 — Trajectory Tracing (top-down video + head IMUs of two rats; mask-triangulated position, IMU orientation)</p>
+    <h1>Set up</h1>
+    <div class="section-label">Cameras</div>
+    <div class="field"><label>camera calibration JSON (GUI 1)</label>
+      <input type="text" id="cfgCalib" placeholder="/path/to/2026_09_21.json"></div>
+    <div class="field"><label>folder with the raw videos cam_N.mp4 (unsegmented; the top-down background)</label>
+      <input type="text" id="cfgVideoRoot" placeholder="/path/to/Day_7_..."></div>
+    <div class="row2">
+      <div class="field"><label>top-down view</label>
+        <select id="cfgView"><option value="median">median of all cameras with a video</option></select></div>
+      <div class="field"><label>fps</label><input type="number" id="cfgFps" placeholder="30" step="1" min="1"></div>
+    </div>
+    <div class="field"><label>floor height in the calibration's table frame, m (blank = estimate from the videos)</label>
+      <input type="number" id="cfgFloor" placeholder="auto" step="0.001"></div>
+    <div class="field"><label>folder with cam_N/masks_raw (every camera found there is used for tracking; default: the videos folder)</label>
+      <input type="text" id="cfgMasksRoot" placeholder="the videos folder"></div>
+    <div class="hint" id="camInfo" style="margin-top:-4px;"></div>
+
+    <div class="section-label">IMU heading</div>
+    <div class="field"><label>re-align each IMU's heading every N frames (0 = only at the anchor frame, from the eyes)</label>
+      <input type="number" id="cfgEvery" list="everyPresets" placeholder="100" step="1" min="0">
+      <datalist id="everyPresets"><option value="0"><option value="10"><option value="30"><option value="100"><option value="300"><option value="1000"></datalist></div>
+
+    <!-- one section per rat (rat n = object n in the masks), filled in by ratSectionHtml below -->
+    <div id="ratSections"></div>
+
+    <button class="enter-btn" id="enterBtn">Run analysis + load</button>
+    <div class="warn" id="setupWarn"></div>
+    <p class="hint">
+      Each rat wears its own IMU and is tracked on its own: rat 1 is object 1 in the masks (red: skull,
+      trajectory, mask tint), rat 2 is object 2 (blue). Untick a rat to track only the other one.<br><br>
+      Tracking uses every camera's masks: the rat's 3D position is triangulated and its body axis fused across
+      views. Orientation is the IMU's own pitch and roll (gravity-referenced); its heading drifts, so it is
+      re-aligned at anchors every N frames to the fused body axis (nose/tail from the walking direction). Small N
+      follows drift closely but pulls the head's heading towards the body's; large N keeps head-vs-body turns but
+      lets drift build up between anchors. The status line shows a held-out score for the N you chose.<br><br>
+      An IMU glued on at an angle makes the head look permanently rolled. Auto removes the constant tilt that
+      puts the head level on average while walking (on this recording about 32 deg of roll); the values it
+      found are shown after the run and can be typed in under manual.<br><br>
+      The median view removes each camera's parallax smear of the rat (it needs 3 or more videos); a single camera
+      view shows the rat stretched away from that camera, since the warp is exact only on the floor. The floor is
+      not at the calibration's z=0: blank estimates its height as the plane where the cameras' rat-free
+      backgrounds line up best.
+    </p>
+  </div>
+</div>
+
+<div id="stage">
+  <div id="videoWrap">
+    <img id="videoImg" alt="top-down view">
+    <canvas id="overlayCanvas"></canvas>
+    <div id="insets"></div>
+  </div>
+  <div id="controls">
+    <button id="playBtn">Play</button>
+    <span id="frameVal">0</span>
+    <input type="range" id="frameSlider" min="0" max="0" step="1" value="0">
+    <span id="timeVal">0.00s</span>
+    <button class="speedBtn" data-speed="0.25">&frac14;&times;</button>
+    <button class="speedBtn active" data-speed="1">1&times;</button>
+    <button class="speedBtn" data-speed="4">4&times;</button>
+    <button id="reconfigureBtn">Change setup</button>
+  </div>
+  <div id="alignRow">
+    <span title="only turns the drawing of the cap scan; does not change the gyroscope data">cap drawing (deg)</span>
+    <label>X <input type="number" id="alignX" value="0" step="5"></label>
+    <label>Y <input type="number" id="alignY" value="0" step="5"></label>
+    <label>Z <input type="number" id="alignZ" value="0" step="5"></label>
+    <label class="checkLabel"><input type="checkbox" id="showAxes" checked> reference axes</label>
+    <label class="checkLabel" title="the head's path over the last 3 s in the 3D views"><input type="checkbox" id="showTrail"> movement trail</label>
+    <label class="checkLabel" title="each rat's head path in the top view, rat 1 red, rat 2 blue"><input type="checkbox" id="showPath" checked> trajectory, last
+      <input type="number" id="pathSeconds" value="3" min="0" step="0.5"> s</label>
+    <label class="checkLabel" title="GUI 2 masks, translucent: object 1 red, object 2 blue"><input type="checkbox" id="showMasks" checked> rat masks</label>
+    <span class="hint" style="margin:0;">drawing only: turns the cap scan onto the axes; to change the gyroscope, use Rotate head in 3D</span>
+  </div>
+  <div class="toolRow" id="headRow">
+    <span class="rowLabel">head</span>
+    <span id="ratPick" title="which rat's head the tools below edit (keys 1 / 2)"></span>
+    <button id="headClickBtn" title="then click the selected rat's head in the video (H toggles)">Click to set head</button>
+    <button id="headRotateBtn" title="then drag a head in its 3D view (R toggles); Shift+drag turns it about vertical only">Rotate head in 3D</button>
+    <select id="headRotateScope" title="what a rotation in the 3D view changes">
+      <option value="frame">this frame &plusmn; reach</option>
+      <option value="mount">all frames (that rat's IMU mounting)</option>
+    </select>
+    <label title="how far a click's local correction reaches, in frames; 0 = only refit the rigid body-to-head offset">reach &plusmn; <input type="number" id="headReach" min="0" step="1"> frames</label>
+    <span id="headChips"></span>
+    <button id="headClearBtn">Clear clicks</button>
+    <span id="headMsg"></span>
+  </div>
+  <div class="toolRow" id="exportRow">
+    <span class="rowLabel">export</span>
+    <label>frames <input type="number" id="expFrom" step="1"> &ndash; <input type="number" id="expTo" step="1"></label>
+    <button id="expRangeBtn" title="from the current frame to the end">from here</button>
+    <select id="expKind" title="what the video shows (filled in once the analysis is loaded)">
+      <option value="video">top view + skull insets</option>
+    </select>
+    <label class="checkLabel"><input type="checkbox" id="expInset" checked> skull insets</label>
+    <label class="checkLabel" title="the dots + nose arrows that follow the rats"><input type="checkbox" id="expMarker"> head markers</label>
+    <label class="checkLabel" title="each rat's head path over the last few seconds (as set above), red / blue"><input type="checkbox" id="expPath" checked> trajectories</label>
+    <label>to <input type="text" id="expDir"></label>
+    <label class="checkLabel" title="also write the per-frame CSV per rat + JSON next to the video"><input type="checkbox" id="expTraj"> + trajectory CSVs</label>
+    <button id="expVideoBtn">Export video</button>
+    <button id="expTrajBtn">Trajectory only</button>
+    <button id="expCancelBtn" style="display:none">Stop</button>
+    <span id="exportMsg"></span>
+  </div>
+  <div id="status"></div>
+</div>
+
+<script src="bundle.js"></script>
+<script>
+const SETUP_API = location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:8975';
+
+const FIELDS = {   // form id -> config key (shared by both rats)
+  cfgVideoRoot: 'video_root', cfgMasksRoot: 'masks_root', cfgCalib: 'calib_json_path', cfgFps: 'fps',
+  cfgEvery: 'anchor_every_frames', cfgView: 'view_mode', cfgFloor: 'floor_z_m',
+};
+const RAT_FIELDS = {   // form id r<n><suffix> -> key in config.rats[n - 1]
+  Quat: 'quat_csv_path', Fwd: 'sensor_forward', Up: 'sensor_up', RollSign: 'imu_roll_sign', Tilt: 'mount_tilt_mode',
+  TiltRoll: 'mount_roll_deg', TiltPitch: 'mount_pitch_deg', Offset: 'imu_offset_frames', Mesh: 'anchor_mesh_dir', Eyes: 'eyes_json_path',
+};
+const NUMERIC = new Set(['fps', 'imu_offset_frames', 'anchor_every_frames', 'floor_z_m', 'mount_roll_deg', 'mount_pitch_deg']);
+const RATS = [[1, 'rgb(255,40,40)', 'red'], [2, 'rgb(40,110,255)', 'blue']];
+
+function ratSectionHtml(n, css, name) {
+  const p = `r${n}`;
+  return `
+    <div class="section-label rat-head"><span class="ratSwatch" style="background:${css}"></span>Rat ${n} (${name}; object ${n} in the masks)
+      <label><input type="checkbox" id="${p}Enabled"> track this rat</label></div>
+    <div class="ratBox" id="${p}Box">
+      <div class="field"><label>head IMU quaternions: CSV with qw,qx,qy,qz or qc_w,qc_x,qc_y,qc_z columns, or the .mat (qc_video); one row per video frame</label>
+        <input type="text" id="${p}Quat" placeholder="/path/to/rat ${n} quaternions.csv"></div>
+      <div class="row2">
+        <div class="field"><label>sensor axis to the nose</label><select id="${p}Fwd"><option>-x</option><option>+x</option><option>+y</option><option>-y</option></select></div>
+        <div class="field"><label>sensor axis up</label><select id="${p}Up"><option>+z</option><option>-z</option><option>+x</option><option>-x</option><option>+y</option><option>-y</option></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>IMU roll direction</label>
+          <select id="${p}RollSign">
+            <option value="as_recorded">as recorded</option>
+            <option value="flip">flip roll only (not physical; use sensor axis -x instead)</option>
+          </select></div>
+        <div class="field"><label>IMU offset (video frame = CSV row + this)</label><input type="number" id="${p}Offset" placeholder="0" step="1"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>IMU mounting tilt correction</label>
+          <select id="${p}Tilt">
+            <option value="auto_roll">auto: roll (head level on average while walking)</option>
+            <option value="auto_roll_pitch">auto: roll + pitch</option>
+            <option value="manual">manual</option>
+            <option value="off">off</option>
+          </select></div>
+        <div class="row2">
+          <div class="field"><label>roll, deg (right ear down)</label><input type="number" id="${p}TiltRoll" placeholder="auto" step="0.1"></div>
+          <div class="field"><label>pitch, deg (nose up)</label><input type="number" id="${p}TiltPitch" placeholder="auto" step="0.1"></div>
+        </div>
+      </div>
+      <div class="field"><label>anchor frame: GUI 2 frame folder of rat ${n} (object_${n}; mesh.obj; frame number read from the name)</label>
+        <input type="text" id="${p}Mesh" placeholder="/path/to/object_${n}/frame_000240"></div>
+      <div class="field"><label>GUI 3 eye positions JSON of rat ${n} for that frame</label>
+        <input type="text" id="${p}Eyes" placeholder="/path/to/eye_positions_object_${n}_frame_000240.json"></div>
+    </div>`;
+}
+document.getElementById('ratSections').innerHTML = RATS.map(([n, css, name]) => ratSectionHtml(n, css, name)).join('');
+for (const [n] of RATS) {
+  const box = () => document.getElementById(`r${n}Box`).classList.toggle('off', !document.getElementById(`r${n}Enabled`).checked);
+  document.getElementById(`r${n}Enabled`).addEventListener('change', box);
+  document.getElementById(`r${n}Tilt`).addEventListener('change', syncTiltFields);
+}
+
+async function populateViews(selected) {
+  const root = document.getElementById('cfgVideoRoot').value.trim();
+  const calib = document.getElementById('cfgCalib').value.trim();
+  const sel = document.getElementById('cfgView');
+  const info = document.getElementById('camInfo');
+  if (!root || !calib) return;
+  try {
+    const d = await (await fetch(`${SETUP_API}/api/videos?root=${encodeURIComponent(root)}&calib=${encodeURIComponent(calib)}`)).json();
+    const cams = d.cameras || [];
+    sel.innerHTML = `<option value="median">median of ${cams.length} cameras with a video (${cams.join(', ') || 'none'})</option>`
+      + cams.map(c => `<option value="${c}">${c} only</option>`).join('');
+    sel.value = selected && (selected === 'median' || cams.includes(selected)) ? selected : 'median';
+    info.textContent = cams.length ? `raw video found for ${cams.join(', ')}` : 'no cam_N.mp4 found in that folder';
+  } catch (e) { /* leave as-is */ }
+}
+
+async function prefillSetup() {
+  try {
+    const cfg = await (await fetch(`${SETUP_API}/api/config`)).json();
+    for (const [id, key] of Object.entries(FIELDS)) {
+      if (id !== 'cfgView' && cfg[key] !== undefined && cfg[key] !== null) document.getElementById(id).value = String(cfg[key]);
+    }
+    for (const [n] of RATS) {
+      const r = (cfg.rats || [])[n - 1] || {};
+      for (const [suffix, key] of Object.entries(RAT_FIELDS)) {
+        if (r[key] !== undefined && r[key] !== null) document.getElementById(`r${n}${suffix}`).value = String(r[key]);
+      }
+      document.getElementById(`r${n}Enabled`).checked = !!r.enabled;
+      document.getElementById(`r${n}Enabled`).dispatchEvent(new Event('change'));
+    }
+    await populateViews(cfg.view_mode);
+  } catch (e) { /* no config yet */ }
+  syncTiltFields();
+}
+['cfgVideoRoot', 'cfgCalib'].forEach(id => document.getElementById(id).addEventListener('change', () => populateViews(document.getElementById('cfgView').value)));
+// the tilt numbers only apply in manual mode; otherwise show what auto found last time
+function syncTiltFields() {
+  for (const [n] of RATS) {
+    const manual = document.getElementById(`r${n}Tilt`).value === 'manual';
+    const last = (window.__lastTilt || {})[n];
+    for (const [suffix, key] of [['TiltRoll', 'roll_deg'], ['TiltPitch', 'pitch_deg']]) {
+      const el = document.getElementById(`r${n}${suffix}`);
+      el.disabled = !manual;
+      el.placeholder = manual ? '0' : (last ? `auto: ${last[key].toFixed(1)}` : 'auto');
+    }
+  }
+}
+fetch(`${SETUP_API}/api/meta`).then(r => r.json()).then(m => {
+  if (m.rats) { window.__lastTilt = Object.fromEntries(m.rats.map(r => [r.id, r.summary.mount_tilt])); syncTiltFields(); }
+}).catch(() => {});
+
+function collectConfig() {
+  const val = (id, key) => {
+    const v = document.getElementById(id).value.trim();
+    return v === '' ? null : (NUMERIC.has(key) ? parseFloat(v) : v);
+  };
+  const cfg = {};
+  for (const [id, key] of Object.entries(FIELDS)) cfg[key] = val(id, key);
+  cfg.rats = RATS.map(([n]) => {
+    const r = { enabled: document.getElementById(`r${n}Enabled`).checked };
+    for (const [suffix, key] of Object.entries(RAT_FIELDS)) r[key] = val(`r${n}${suffix}`, key);
+    return r;
+  });
+  return cfg;
+}
+
+async function waitForAnalysis(warn) {
+  for (;;) {
+    const p = await (await fetch(`${SETUP_API}/api/progress`)).json();
+    const bar = p.total ? ` ${p.done}/${p.total}` : '';
+    warn.textContent = `${p.stage || 'working'}${bar}\n` + (p.log || []).join('\n');
+    if (p.error) throw new Error(p.error);
+    if (p.ready && !p.running) return;
+    await new Promise(res => setTimeout(res, 700));
+  }
+}
+
+document.getElementById('enterBtn').addEventListener('click', async () => {
+  const warn = document.getElementById('setupWarn');
+  const btn = document.getElementById('enterBtn');
+  if (typeof window.__enterPlayback !== 'function') { warn.textContent = 'bundle.js did not load: run  npm install && npm run build  next to server.py'; return; }
+  btn.disabled = true; warn.textContent = 'starting…';
+  try {
+    const r = await fetch(`${SETUP_API}/api/config`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(collectConfig()) })
+      .then(x => x.json()).catch(e => ({ ok: false, error: e.message + ' (is server.py running on ' + SETUP_API + '?)' }));
+    if (!r.ok) throw new Error(r.error);
+    if (r.config) document.getElementById('cfgMasksRoot').value = r.config.masks_root || '';   // derived default
+    await waitForAnalysis(warn);
+    const meta = await (await fetch(`${SETUP_API}/api/meta`)).json();
+    document.getElementById('setupOverlay').style.display = 'none';
+    document.getElementById('stage').style.display = 'flex';
+    window.__enterPlayback(meta);
+  } catch (e) {
+    warn.textContent = 'not loaded: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('reconfigureBtn').addEventListener('click', () => {
+  document.getElementById('stage').style.display = 'none';
+  document.getElementById('setupOverlay').style.display = 'flex';
+});
+
+prefillSetup();
+</script>
+</body>
+</html>

@@ -312,7 +312,16 @@ def project_points(pts_world, R, t, K, dist):
     return px, in_front
 
 
-def carve_voxels(pts, cameras, masks, min_cameras, log=print):
+def carve_voxels(pts, cameras, masks, min_cameras, log=print,
+                  relaxed_min_cameras=None, relaxed_zone_mask=None):
+    """Vote-carve pts against each camera's mask. By default every point
+    needs >= min_cameras votes. If relaxed_zone_mask is given (a boolean
+    array over pts), points inside it only need >= relaxed_min_cameras --
+    for recovering a specific, spatially-known-to-be-marginal region (e.g.
+    the head, when it's only ever seen by a minority of cameras at once)
+    without lowering the threshold everywhere, which would also let
+    under-constrained noise through elsewhere (see the ghost-artifact
+    behaviour of a globally-lowered min_cameras)."""
     N = len(pts)
     votes = np.zeros(N, dtype=np.int32)
     active = [(c, m) for c, m in zip(cameras, masks) if m is not None]
@@ -326,6 +335,16 @@ def carve_voxels(pts, cameras, masks, min_cameras, log=print):
         hit[inside] = mask[v[inside], u[inside]] > 0
         votes += hit.astype(np.int32)
         log(f"    {cam['name']}: {hit.sum():,} voxels in mask")
+
+    if relaxed_min_cameras is not None and relaxed_zone_mask is not None:
+        threshold = np.full(N, min_cameras, dtype=np.int32)
+        threshold[relaxed_zone_mask] = relaxed_min_cameras
+        occupied = votes >= threshold
+        rescued = int((relaxed_zone_mask & (votes >= relaxed_min_cameras) & (votes < min_cameras)).sum())
+        log(f"    relaxed zone: {int(relaxed_zone_mask.sum()):,} voxels eligible, "
+            f"{rescued:,} kept only because of the relaxed threshold "
+            f"({relaxed_min_cameras} vs {min_cameras})")
+        return occupied
     return votes >= min_cameras
 
 
@@ -626,7 +645,10 @@ def save_textured_obj(path, verts, faces, corner_uv, atlas_rgb):
 # Orchestration
 # =============================================================================
 
-def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
+def reconstruct_frame(cameras, mask_paths_ordered, params, log=print, fit_context=None):
+    """fit_context: an optional dict the caller keeps across frames of a
+    sequence; used by the template-completion step to cache the loaded
+    template and warm-start each frame's fit from the previous one."""
     colors, masks = load_masks(mask_paths_ordered)
     centre = estimate_rat_centre(cameras, mask_paths_ordered, log=log)
 
@@ -635,7 +657,19 @@ def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
     )
     log(f"    grid: {shape[0]}x{shape[1]}x{shape[2]} = {shape[0]*shape[1]*shape[2]:,} voxels")
 
-    occupied = carve_voxels(pts, cameras, masks, params["min_cameras"], log=log)
+    relaxed_min_cameras = None
+    relaxed_zone_mask = None
+    head_min_cameras = params.get("head_min_cameras")
+    head_zone_frac = params.get("head_zone_frac") or 0.0
+    if head_min_cameras is not None and head_zone_frac > 0 and head_min_cameras < params["min_cameras"]:
+        zone_z_start = centre[2] + params["depth_above"] * (1.0 - head_zone_frac)
+        relaxed_zone_mask = pts[:, 2] >= zone_z_start
+        relaxed_min_cameras = head_min_cameras
+        log(f"    head zone: top {head_zone_frac:.0%} of depth_above (z >= {zone_z_start:+.4f}), "
+            f"relaxed min_cameras={head_min_cameras} there (normal min_cameras={params['min_cameras']} elsewhere)")
+
+    occupied = carve_voxels(pts, cameras, masks, params["min_cameras"], log=log,
+                             relaxed_min_cameras=relaxed_min_cameras, relaxed_zone_mask=relaxed_zone_mask)
     n_occ = int(occupied.sum())
     log(f"    occupied: {n_occ:,} / {len(occupied):,} voxels")
     if n_occ == 0:
@@ -653,9 +687,41 @@ def reconstruct_frame(cameras, mask_paths_ordered, params, log=print):
         verts = taubin_smooth(verts, faces, iterations=smooth_iterations)
         log(f"    smoothed surface ({smooth_iterations} Taubin iterations)")
 
-    texture_mode = params.get("texture_mode", "atlas")  # "atlas" | "vertex_color" | "none"
     result = {"verts": verts, "faces": faces, "centre": centre,
-              "vertex_colors": None, "corner_uv": None, "atlas": None}
+              "vertex_colors": None, "corner_uv": None, "atlas": None,
+              "hull_verts": None, "hull_faces": None, "fit_report": None}
+
+    # Optional model-based completion: deform a complete rat template to the
+    # same silhouettes + this hull, so parts too few cameras agree on (the
+    # head, typically) come from the template's anatomy instead of being
+    # carved away. The raw hull is kept in the result for reference.
+    if params.get("completion_mode", "none") == "template":
+        import template_fit_lib as tfl
+        template_path = params.get("template_path") or str(
+            Path(__file__).resolve().parent / "templates" / "rat_template.obj")
+        ctx = fit_context if fit_context is not None else {}
+        if ctx.get("template_path") != template_path:
+            ctx.clear()
+            ctx["template_path"] = template_path
+            ctx["template"] = tfl.load_obj(template_path)
+        tmpl_verts, tmpl_faces = ctx["template"]
+        warm = ctx.get("state")
+        if warm is not None and np.linalg.norm(centre - ctx["centre"]) > 0.10:
+            warm = None
+            log("    animal moved > 10 cm since the last fitted frame; cold-starting the template fit")
+        fit_params = {"iterations": params.get("fit_iterations"),
+                      "n_nodes": params.get("fit_nodes"),
+                      "sil_cameras": params.get("fit_sil_cameras")}
+        log(f"    template completion: fitting {Path(template_path).name} to the silhouettes + hull")
+        fit = tfl.fit_template(tmpl_verts, tmpl_faces, cameras, masks, verts,
+                               params=fit_params, log=log, warm_start=warm)
+        ctx["state"], ctx["centre"] = fit["state"], centre
+        result["hull_verts"], result["hull_faces"] = verts, faces
+        verts, faces = fit["verts"], fit["faces"]
+        result["verts"], result["faces"] = verts, faces
+        result["fit_report"] = {k: v for k, v in fit["report"].items() if k != "support_count"}
+
+    texture_mode = params.get("texture_mode", "atlas")  # "atlas" | "vertex_color" | "none"
 
     if texture_mode == "atlas":
         corner_uv, _ = unwrap_cylindrical(verts, faces)

@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Head tracking</title>
+<style>
+  :root {
+    --bg: #15140f; --bg-elevated: #1e1c15; --text: #f1ede1; --text-dim: #9c9686;
+    --accent: #c9a13b; --border: #34311f;
+    --rat1: #ff2828; --rat2: #286eff; /* rat identity colours, same as GUI 5.1's mask tint and the plots */
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; height: 100vh; width: 100vw; }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  #panel {
+    position: fixed; top: 16px; left: 16px; width: 320px;
+    background: rgba(30,28,21,0.92); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    max-height: calc(100vh - 32px); overflow-y: auto;
+    display: none;
+  }
+  #results {
+    position: fixed; top: 16px; right: 16px; width: 420px;
+    background: rgba(30,28,21,0.92); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    max-height: calc(100vh - 32px); overflow-y: auto;
+    display: none;
+  }
+  #results img { width: 100%; border-radius: 6px; border: 1px solid var(--border); margin: 6px 0 10px 0; cursor: zoom-in; background: #fcfcfb; }
+  .eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px 0; }
+  .title { font-size: 15px; font-weight: 600; margin: 0 0 10px 0; }
+  .section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .section-label { font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+
+  button { font-family: var(--sans); font-size: 12.5px; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; width: 100%;
+    text-align: left; margin-bottom: 5px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.active { background: var(--accent); color: #1a1608; border-color: var(--accent); font-weight: 600; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; text-align: center; }
+  .row > * { flex: 1; min-width: 0; }
+  .save-row button { background: #2a4a2e; border-color: #3f6b46; color: #cdeed1; font-weight: 600; text-align: center; }
+  .run-btn { background: #3a4a6e !important; border-color: #5c76ad !important; color: #d8e2f5 !important; font-weight: 600; text-align: center; }
+
+  .check-row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .slider-row { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .slider-row input[type=range] { width: 100%; margin-top: 4px; accent-color: var(--accent); }
+  .frame-row { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .frame-row label { width: 58px; flex: none; }
+  .frame-row select { flex: 1; min-width: 0; }
+  .frame-row button { width: 30px; flex: none; text-align: center; padding: 6px 0; margin: 0; }
+  select, input[type=number] {
+    font-family: var(--mono); font-size: 12px; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+  .param-grid label { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); display: block; margin-bottom: 2px; }
+  .param-grid input, .param-grid select { width: 100%; }
+
+  #status { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-top: 8px; white-space: pre-wrap; }
+  .hint { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); line-height: 1.6; margin-top: 8px; }
+  .hint b { color: var(--text); font-weight: 600; }
+  .warn { color: #e0a34a; }
+  #log { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); max-height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px; margin-top: 6px; white-space: pre-wrap; display: none; }
+  table.summary { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; margin-bottom: 8px; }
+  table.summary td { padding: 3px 4px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+  table.summary td:last-child { text-align: right; color: var(--text); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .swatch.rat1 { background: var(--rat1); } .swatch.rat2 { background: var(--rat2); }
+  .rat-block { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .rat-title { font-size: 13px; font-weight: 600; margin: 0 0 6px 0; }
+
+  /* --- setup overlay --- */
+  #setupOverlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .setup-card { width: 600px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 28px 30px; }
+  .setup-card h1 { font-size: 19px; margin: 0 0 4px 0; }
+  .setup-card .eyebrow { margin-bottom: 10px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  input[type=text] { font-family: var(--mono); font-size: 12.5px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; }
+  input[type=text]:focus, select:focus, input[type=number]:focus { outline: none; border-color: var(--accent); }
+  .setup-card .enter-btn { width: auto; padding: 10px 22px; font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1a1608; margin-top: 6px; }
+
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; }
+  #lightbox img { max-width: 96vw; max-height: 96vh; border-radius: 8px; background: #fcfcfb; }
+</style>
+</head>
+<body>
+
+<div id="setupOverlay">
+  <div class="setup-card">
+    <p class="eyebrow">Pipeline stage 5 / 5</p>
+    <h1>Head tracking: setup</h1>
+    <div class="hint" style="margin:-2px 0 12px 0;">No head-mounted IMU is used here. Position, heading <b>and</b> head all come
+      from every rig camera's GUI 2 segmentation mask (triangulated centroid, fused long axis, and the body end away
+      from the tail); each rat's own mesh only fills in its head where the masks lose it for 3+ frames. Rat 1
+      (<span class="swatch rat1"></span>red) is object 1 in the masks, rat 2 (<span class="swatch rat2"></span>blue) is
+      object 2; which of them to track is ticked per run in the analysis section.</div>
+    <div class="field"><label>camera calibration JSON path (from GUI 1; defines the world / table frame)</label><input type="text" id="cfgCalib" placeholder="/path/to/data/calibration/output/2026_04_14/2026_04_14.json"></div>
+    <div class="field"><label>folder with cam_N/masks_raw (every rig camera found there is used for tracking)</label><input type="text" id="cfgMasksRoot" placeholder="/path/to/raw/frames"></div>
+    <div class="field"><label>object 1 (rat 1, red) mesh root, optional: 3D view, and rat 1's head fallback (folder containing frame_XXXXXX/ subfolders with mesh.obj)</label><input type="text" id="cfgRat1" placeholder="/path/to/meshes/rat/object_1/output"></div>
+    <div class="field"><label>object 2 (rat 2, blue) mesh root, optional: 3D view, and rat 2's head fallback</label><input type="text" id="cfgRat2" placeholder="/path/to/meshes/rat/object_2/output"></div>
+    <div class="field"><label>video frame rate (rows per second)</label><input type="text" id="cfgFps" value="30"></div>
+    <div class="field"><label>camera images root — optional (6-camera re-projection check; expects cam_&lt;n&gt;/all_objects/frame_XXXXXX.png under it)</label><input type="text" id="cfgCamImages" placeholder="/path/to/raw/frames"></div>
+    <div class="field"><label>mesh coordinate frame (3D view and head fallback)</label>
+      <select id="cfgMeshFrame">
+        <option value="calib" selected>calibration frame, metres (GUI 2 output: true world position, relative placement is real)</option>
+        <option value="yup">already upright, y up (re-oriented / re-centred export: shown as is, no world position)</option>
+      </select></div>
+    <button class="enter-btn" id="enterBtn">Enter scene</button>
+  </div>
+</div>
+
+<div id="stage"></div>
+
+<div id="panel">
+  <p class="eyebrow">Pipeline stage 5 / 5</p>
+  <p class="title">Head tracking from the masks</p>
+
+  <div class="section">
+    <div class="section-label">Meshes (true relative position, any frame)</div>
+    <div class="frame-row"><label><span class="swatch rat1"></span>rat 1</label><button id="rat1Prev">&lsaquo;</button><select id="rat1Frame"></select><button id="rat1Next">&rsaquo;</button></div>
+    <div class="frame-row"><label><span class="swatch rat2"></span>rat 2</label><button id="rat2Prev">&lsaquo;</button><select id="rat2Frame"></select><button id="rat2Next">&rsaquo;</button></div>
+    <div class="check-row"><input type="checkbox" id="chkRat2" checked> <label for="chkRat2">show rat 2</label></div>
+    <div class="check-row"><input type="checkbox" id="chkRig" checked> <label for="chkRig">show camera rig</label></div>
+    <div class="check-row"><input type="checkbox" id="chkSync"> <label for="chkSync">keep rat 2 at the same frame as rat 1</label></div>
+    <div class="section-label" style="margin-top:10px;">Placement frame</div>
+    <div class="check-row"><input type="radio" name="placeMode" id="modeWorld" value="world" checked> <label for="modeWorld">as reconstructed (true relative position)</label></div>
+    <div class="check-row"><input type="radio" name="placeMode" id="modeSplit" value="split"> <label for="modeSplit">side by side (display only, for re-centred meshes)</label></div>
+    <div id="meshInfo" class="hint"></div>
+    <button id="focusBtn">Focus view on the rats (F)</button>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Playback (3D view only: after an analysis, moves each rat's head marker along its path over the analysed window; masks are read directly by frame number, not through this scrubber)</div>
+    <div class="slider-row"><label for="frameSlider">frame <span id="frameVal">0</span> / <span id="frameMax">0</span> &middot; <span id="timeVal">0.00</span> s</label><input type="range" id="frameSlider" min="0" max="4000" step="1" value="0"></div>
+    <div class="row">
+      <button id="playBtn">Play</button>
+    </div>
+    <div class="row">
+      <button data-speed="0.25">&frac14;&times;</button><button data-speed="1" class="active">1&times;</button><button data-speed="4">4&times;</button><button data-speed="10">10&times;</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Analysis window</div>
+    <div class="check-row"><input type="checkbox" id="chkTrack1" checked> <label for="chkTrack1"><span class="swatch rat1"></span>track rat 1 (red, object 1)</label></div>
+    <div class="check-row"><input type="checkbox" id="chkTrack2" checked> <label for="chkTrack2"><span class="swatch rat2"></span>track rat 2 (blue, object 2)</label></div>
+    <div class="param-grid">
+      <div><label>first frame</label><input type="number" id="pFrameStart" value="0" step="1" min="0"></div>
+      <div><label>last frame</label><input type="number" id="pFrameEnd" step="1" min="0"></div>
+      <div><label>present / reference frame (blank = first frame)</label><input type="number" id="pRefFrame" placeholder="first frame" step="1" min="0"></div>
+      <div><label>min confidence to trust a camera's heading</label><input type="number" id="pMinConf" value="0.15" step="0.01" min="0" max="1"></div>
+      <div><label>rest: angular speed &lt; (deg/s)</label><input type="number" id="pAng" value="20" step="1" min="0"></div>
+      <div><label>rest: linear speed &lt; (m/s)</label><input type="number" id="pLin" value="0.05" step="0.01" min="0"></div>
+      <div><label>min state duration (s)</label><input type="number" id="pMinDur" value="0.5" step="0.1" min="0"></div>
+      <div><label>orientation smoothing (s)</label><input type="number" id="pSmooth" value="0.25" step="0.05" min="0"></div>
+      <div><label>position smoothing (s)</label><input type="number" id="pPosSmooth" value="1.0" step="0.1" min="0"></div>
+      <div><label>max gap to interpolate (frames)</label><input type="number" id="pGap" value="60" step="10" min="0"></div>
+    </div>
+    <button class="run-btn" id="runBtn" style="margin-top:8px;">Run analysis</button>
+    <div id="log"></div>
+    <div class="check-row" style="margin-top:6px;"><input type="checkbox" id="chkPath" checked> <label for="chkPath">show paths in 3D (after analysis)</label></div>
+    <div class="check-row"><label for="pathColor" style="flex:none;">colour paths by</label>
+      <select id="pathColor"><option value="rat" selected>rat (red / blue)</option><option value="state">behavioural state</option></select></div>
+  </div>
+
+  <div id="status">loading…</div>
+  <div class="hint">
+    drag to orbit &middot; scroll to zoom &middot; right-drag to pan<br>
+    <b>1.</b> the meshes above are for orientation only (and the head fallback)<br>
+    <b>2.</b> pick the frame range to analyse and tick the rats to track<br>
+    <b>3.</b> run the analysis: every frame's position, heading and head come straight from the masks, no per-frame placement step<br>
+    <b>4.</b> scrub or play to move each rat's head marker along its path
+  </div>
+</div>
+
+<div id="results">
+  <p class="eyebrow">Results</p>
+  <p class="title" id="resTitle">—</p>
+  <div id="resSummary"></div>
+  <div id="resPlots"></div>
+  <div class="hint" id="resFiles"></div>
+</div>
+
+<div id="lightbox"><img id="lightboxImg" alt=""></div>
+
+<script src="bundle.js"></script>
+<script>
+// same origin as the page when served by server.py (also works through a forwarded port); fixed port only for file://
+const SETUP_API = location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:8976';
+
+async function prefillSetup() {
+  try {
+    const cfg = await (await fetch(`${SETUP_API}/api/config`)).json();
+    if (cfg.calib_json_path) document.getElementById('cfgCalib').value = cfg.calib_json_path;
+    if (cfg.rat1_root) document.getElementById('cfgRat1').value = cfg.rat1_root;
+    if (cfg.rat2_root) document.getElementById('cfgRat2').value = cfg.rat2_root;
+    if (cfg.masks_root) document.getElementById('cfgMasksRoot').value = cfg.masks_root;
+    if (cfg.fps) document.getElementById('cfgFps').value = cfg.fps;
+    if (cfg.mesh_frame) document.getElementById('cfgMeshFrame').value = cfg.mesh_frame;
+    if (cfg.camera_image_root) document.getElementById('cfgCamImages').value = cfg.camera_image_root;
+  } catch (e) { /* no config yet */ }
+}
+
+document.getElementById('enterBtn').addEventListener('click', async () => {
+  const cfg = {
+    calib_json_path: document.getElementById('cfgCalib').value.trim(),
+    rat1_root: document.getElementById('cfgRat1').value.trim(),
+    rat2_root: document.getElementById('cfgRat2').value.trim(),
+    masks_root: document.getElementById('cfgMasksRoot').value.trim(),
+    fps: parseFloat(document.getElementById('cfgFps').value) || 30,
+    mesh_frame: document.getElementById('cfgMeshFrame').value,
+    camera_image_root: document.getElementById('cfgCamImages').value.trim(),
+  };
+  if (!cfg.calib_json_path || !cfg.masks_root) {
+    alert('calibration JSON and the masks folder are required');
+    return;
+  }
+  const r = await fetch(`${SETUP_API}/api/config`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) })
+    .then(x => x.json()).catch(e => ({ ok: false, error: e.message + ' (is server.py running on ' + SETUP_API + '?)' }));
+  if (!r.ok) { alert('config not saved: ' + r.error); return; }
+  if (r.missing_paths && r.missing_paths.length) {
+    if (!confirm('these paths do not exist on the server: ' + r.missing_paths.join(', ') + '\n\nenter the scene anyway?')) return;
+  }
+  if (typeof window.__enterScene !== 'function') { alert('bundle.js did not load: run  npm install && npm run build  next to server.py'); return; }
+  document.getElementById('setupOverlay').style.display = 'none';
+  document.getElementById('panel').style.display = 'block';
+  window.__enterScene(cfg);
+});
+
+document.getElementById('lightbox').addEventListener('click', () => { document.getElementById('lightbox').style.display = 'none'; });
+
+prefillSetup();
+</script>
+</body>
+</html>
