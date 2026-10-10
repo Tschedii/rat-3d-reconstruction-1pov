@@ -33,7 +33,7 @@ classifier are in the companion repository
   </tr>
 </table>
 
-▶️ **Full video (55 s):** [`docs/media/rig_to_first_person.mp4`](docs/media/rig_to_first_person.mp4),
+▶️ **Full video (55 s, MP4, 4 MB):** [download `rig_to_first_person.mp4`](https://raw.githubusercontent.com/Tschedii/rat-3d-reconstruction-1pov/master/docs/media/rig_to_first_person.mp4),
 the whole pipeline on the Day 7 session (rats rPEG007 and rPEG008), rendered
 with [`video_rendering/`](video_rendering).
 
@@ -255,7 +255,7 @@ paths, the two IMU skulls, and both 3D head paths, all in sync.
 
 <p align="center"><img src="docs/media/head_tracking_two_rats.gif" width="95%" alt="Three-panel video of both rats"></p>
 
-▶️ **Full video (39 s):** [`docs/media/head_tracking_two_rats.mp4`](docs/media/head_tracking_two_rats.mp4)
+▶️ **Full video (39 s, MP4, 3 MB):** [download `head_tracking_two_rats.mp4`](https://raw.githubusercontent.com/Tschedii/rat-3d-reconstruction-1pov/master/docs/media/head_tracking_two_rats.mp4)
 
 <details>
 <summary>Single frames: the cap and skull pose against the camera view</summary>

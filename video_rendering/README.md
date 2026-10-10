@@ -1,6 +1,6 @@
 # Video rendering (Blender)
 
-The pipeline behind [`docs/media/rig_to_first_person.mp4`](../docs/media/rig_to_first_person.mp4),
+The pipeline behind [`rig_to_first_person.mp4`](https://raw.githubusercontent.com/Tschedii/rat-3d-reconstruction-1pov/master/docs/media/rig_to_first_person.mp4) (download),
 a 55 s video of the whole 3D pipeline on Day 7 (frames 220 to 1000):
 
 | Part | Shows |
