@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rat 3D Videos</title>
+<meta name="description" content="Videos of the six-camera 3D reconstruction and head tracking of two rats (master's thesis, Institute of Neuroinformatics, UZH / ETH Zurich).">
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --muted: #5f6368;
+    --border: #e2e2de;
+    --accent: #2f6b3a;
+    --accent-soft: #e6f0e7;
+    --rat1: #e63946;
+    --rat2: #286eff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111312;
+      --surface: #1a1d1b;
+      --text: #ececea;
+      --muted: #a3a8a4;
+      --border: #2c312d;
+      --accent: #7cc48a;
+      --accent-soft: #223127;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111312;
+    --surface: #1a1d1b;
+    --text: #ececea;
+    --muted: #a3a8a4;
+    --border: #2c312d;
+    --accent: #7cc48a;
+    --accent-soft: #223127;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 40px 16px 64px; }
+  header h1 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); line-height: 1.2; margin: 0 0 8px; }
+  header p { color: var(--muted); margin: 0; max-width: 760px; }
+  .repos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .repos a {
+    display: inline-block; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text); text-decoration: none; font-size: 0.9rem; background: var(--surface);
+  }
+  .repos a:hover { border-color: var(--accent); color: var(--accent); }
+  section {
+    margin-top: 36px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 20px; overflow: hidden;
+  }
+  section h2 { font-size: 1.25rem; margin: 0 0 4px; }
+  .meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 14px; }
+  video { display: block; width: 100%; height: auto; border-radius: 8px; background: #000; }
+  .chapters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chapters button {
+    font: inherit; font-size: 0.86rem; cursor: pointer; padding: 5px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .chapters button span { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .chapters button:hover { border-color: var(--accent); }
+  .chapters button[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .chapters button[aria-current="true"] span { color: var(--accent); }
+  .notes { margin: 14px 0 0; padding-left: 20px; color: var(--muted); font-size: 0.93rem; }
+  .notes li { margin: 3px 0; }
+  .dot { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; vertical-align: baseline; }
+  .dot.r1 { background: var(--rat1); } .dot.r2 { background: var(--rat2); }
+  footer { margin-top: 32px; color: var(--muted); font-size: 0.88rem; }
+  footer a { color: inherit; }
+  @media (max-width: 600px) { main { padding-top: 24px; } section { padding: 14px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Two rats, six cameras, one 3D scene</h1>
+    <p>Videos from my master's thesis at the Institute of Neuroinformatics (UZH / ETH Zurich), all on the Day 7 session
+      (rats rPEG007 and rPEG008). Rat 1 <span class="dot r1"></span> is red and rat 2 <span class="dot r2"></span> is blue
+      throughout.</p>
+    <div class="repos">
+      <a href="https://github.com/Tschedii/rat-3d-reconstruction-1pov">3D reconstruction code</a>
+      <a href="https://github.com/Tschedii/rat-social-behaviour-classification">Behaviour classification code</a>
+    </div>
+  </header>
+
+  <section aria-labelledby="v1">
+    <h2 id="v1">From the camera rig to a rat's first-person view</h2>
+    <p class="meta">55 s · recording frames 220 to 1000 · rendered in Blender from the outputs of GUIs 1 to 5.2</p>
+    <video id="pipeline" controls playsinline preload="metadata" poster="media/poster_rig_to_first_person.jpg">
+      <source src="media/rig_to_first_person.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="media/rig_to_first_person.mp4">Download it</a>.
+    </video>
+    <div class="chapters" data-for="pipeline" role="group" aria-label="Chapters">
+      <button data-t="0"><span>0:00</span>Calibrated rig</button>
+      <button data-t="7.5"><span>0:07</span>IMU heads, frames 220 to 500</button>
+      <button data-t="18.2"><span>0:18</span>Reconstruction at frame 500</button>
+      <button data-t="34.53"><span>0:34</span>Both rats moving</button>
+      <button data-t="39.53"><span>0:39</span>Scanned room</button>
+      <button data-t="42.87"><span>0:42</span>Field of view</button>
+      <button data-t="46.37"><span>0:46</span>First-person view</button>
+    </div>
+    <ul class="notes">
+      <li><b>Reconstruction:</b> seed point from the mask centroids, voxel carving camera by camera, the visual hull's
+        surface, then the fitted rat template (what it adds in colour) and the fur textured from the cameras.</li>
+      <li><b>IMU heads:</b> head orientation from each rat's IMU, head position tracked from the six cameras' masks.</li>
+      <li><b>First-person view:</b> rat 1's eye camera (eyes marked in GUI 3, GUI 4's 120° × 133° view), gimbal-stabilised, frames 750 to 1000,
+        with rat 2 labelled whenever it is in view.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="v2">
+    <h2 id="v2">Head tracking of both rats</h2>
+    <p class="meta">39 s · recording frames 220 to 1400 · GUI 5.3</p>
+    <video id="heads" controls playsinline preload="metadata" poster="media/poster_head_tracking_two_rats.jpg">
+      <source src="media/head_tracking_two_rats.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="media/head_tracking_two_rats.mp4">Download it</a>.
+    </video>
+    <ul class="notes">
+      <li><b>Left:</b> camera 1 with both rats tinted from their segmentation masks, each head as a dot and its last
+        seconds of head path.</li>
+      <li><b>Top right:</b> each rat's head orientation from its IMU (GUI 5.1).</li>
+      <li><b>Bottom right:</b> both head paths in 3D, tracked from the masks of all six cameras (GUI 5.2).</li>
+    </ul>
+  </section>
+
+  <footer>
+    Cedric Pfister, 2026 · Code under the MIT license in the
+    <a href="https://github.com/Tschedii/rat-3d-reconstruction-1pov">rat-3d-reconstruction-1pov</a> repository.
+  </footer>
+</main>
+<script>
+  document.querySelectorAll('.chapters').forEach(function (group) {
+    var video = document.getElementById(group.dataset.for);
+    var buttons = Array.prototype.slice.call(group.querySelectorAll('button'));
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        video.currentTime = parseFloat(b.dataset.t);
+        video.play();
+      });
+    });
+    function mark() {
+      var t = video.currentTime, current = buttons[0];
+      buttons.forEach(function (b) { if (t >= parseFloat(b.dataset.t) - 0.05) current = b; });
+      buttons.forEach(function (b) { b.setAttribute('aria-current', b === current ? 'true' : 'false'); });
+    }
+    video.addEventListener('timeupdate', mark);
+    video.addEventListener('seeked', mark);
+    mark();
+  });
+</script>
+</body>
+</html>
